@@ -1,0 +1,42 @@
+secrets:
+  discord_token:
+    file: ./discord_token.txt
+
+services:
+  db:
+    container_name: records-db
+    image: postgres:16.3-alpine3.20
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: records
+    ports:
+      - "5432:5432"
+    volumes:
+      - /mnt/raid0/discord-records-bot/postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    container_name: discord-records-bot
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token
+      DATABASE_URL: postgres://postgres:postgres@db:5432/records?sslmode=disable
+      RAID_MOUNT_PATH: /mnt/raid0
+      DISK_WARN_THRESHOLD: "90"
+      DISK_WARN_CHANNEL: bot-alerts
+    secrets:
+      - discord_token
+    volumes:
+      - /mnt/raid0:/mnt/raid0:ro
