@@ -7,11 +7,15 @@ CREATE TABLE IF NOT EXISTS messages (
     display_name TEXT NOT NULL DEFAULT '',
     avatar_url TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
+    original_content TEXT NOT NULL DEFAULT '',
     sent_at TIMESTAMPTZ NOT NULL,
     edited_at TIMESTAMPTZ,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ
 );
+
+-- Migration for existing databases
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS original_content TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS message_contents (
     id SERIAL PRIMARY KEY,

@@ -13,18 +13,19 @@ import (
 var schemaSQL string
 
 type StoredMessage struct {
-	ID          string
-	GuildID     string
-	ChannelID   string
-	UserID      string
-	Username    string
-	DisplayName string
-	AvatarURL   string
-	Content     string
-	SentAt      time.Time
-	EditedAt    *time.Time
-	IsDeleted   bool
-	DeletedAt   *time.Time
+	ID              string
+	GuildID         string
+	ChannelID       string
+	UserID          string
+	Username        string
+	DisplayName     string
+	AvatarURL       string
+	Content         string
+	OriginalContent string
+	SentAt          time.Time
+	EditedAt        *time.Time
+	IsDeleted       bool
+	DeletedAt       *time.Time
 }
 
 type StoredContent struct {
@@ -67,8 +68,8 @@ func saveMessage(m *discordgo.Message) error {
 	}
 
 	_, err := db.Exec(`
-		INSERT INTO messages (id, guild_id, channel_id, user_id, username, display_name, avatar_url, content, sent_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO messages (id, guild_id, channel_id, user_id, username, display_name, avatar_url, content, original_content, sent_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
 		ON CONFLICT (id) DO NOTHING`,
 		m.ID, m.GuildID, m.ChannelID, m.Author.ID,
 		m.Author.Username, displayName, avatarURL,
@@ -112,7 +113,7 @@ func getLatestMessage(channelID, userID, excludeMessageID string) (*StoredMessag
 	msg := &StoredMessage{}
 	err := db.QueryRow(`
 		SELECT id, guild_id, channel_id, user_id, username, display_name,
-		       avatar_url, content, sent_at, edited_at, is_deleted, deleted_at
+		       avatar_url, content, original_content, sent_at, edited_at, is_deleted, deleted_at
 		FROM messages
 		WHERE channel_id = $1 AND user_id = $2 AND id != $3
 		ORDER BY sent_at DESC
@@ -121,7 +122,7 @@ func getLatestMessage(channelID, userID, excludeMessageID string) (*StoredMessag
 	).Scan(
 		&msg.ID, &msg.GuildID, &msg.ChannelID, &msg.UserID,
 		&msg.Username, &msg.DisplayName, &msg.AvatarURL,
-		&msg.Content, &msg.SentAt, &msg.EditedAt, &msg.IsDeleted, &msg.DeletedAt,
+		&msg.Content, &msg.OriginalContent, &msg.SentAt, &msg.EditedAt, &msg.IsDeleted, &msg.DeletedAt,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -135,7 +136,7 @@ func getLatestDeletedMessage(channelID, userID string) (*StoredMessage, []Stored
 	msg := &StoredMessage{}
 	err := db.QueryRow(`
 		SELECT id, guild_id, channel_id, user_id, username, display_name,
-		       avatar_url, content, sent_at, edited_at, is_deleted, deleted_at
+		       avatar_url, content, original_content, sent_at, edited_at, is_deleted, deleted_at
 		FROM messages
 		WHERE channel_id = $1 AND user_id = $2 AND is_deleted = TRUE
 		ORDER BY deleted_at DESC
@@ -144,7 +145,28 @@ func getLatestDeletedMessage(channelID, userID string) (*StoredMessage, []Stored
 	).Scan(
 		&msg.ID, &msg.GuildID, &msg.ChannelID, &msg.UserID,
 		&msg.Username, &msg.DisplayName, &msg.AvatarURL,
-		&msg.Content, &msg.SentAt, &msg.EditedAt, &msg.IsDeleted, &msg.DeletedAt,
+		&msg.Content, &msg.OriginalContent, &msg.SentAt, &msg.EditedAt, &msg.IsDeleted, &msg.DeletedAt,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	contents, err := getMessageContents(msg.ID)
+	return msg, contents, err
+}
+
+func getMessageByID(messageID string) (*StoredMessage, []StoredContent, error) {
+	msg := &StoredMessage{}
+	err := db.QueryRow(`
+		SELECT id, guild_id, channel_id, user_id, username, display_name,
+		       avatar_url, content, original_content, sent_at, edited_at, is_deleted, deleted_at
+		FROM messages
+		WHERE id = $1`,
+		messageID,
+	).Scan(
+		&msg.ID, &msg.GuildID, &msg.ChannelID, &msg.UserID,
+		&msg.Username, &msg.DisplayName, &msg.AvatarURL,
+		&msg.Content, &msg.OriginalContent, &msg.SentAt, &msg.EditedAt, &msg.IsDeleted, &msg.DeletedAt,
 	)
 	if err != nil {
 		return nil, nil, err

@@ -21,6 +21,15 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		log.Printf("Error saving message %s: %v", m.ID, err)
 	}
 
+	if !isBotMentioned(m.Mentions) {
+		return
+	}
+
+	if m.MessageReference != nil && m.MessageReference.MessageID != "" {
+		handleRepostOriginal(s, m)
+		return
+	}
+
 	target := findMentionedTarget(m.Mentions)
 	if target == nil {
 		return
@@ -41,29 +50,24 @@ func isQuotesChannel(s *discordgo.Session, channelID string) bool {
 	return err == nil && strings.EqualFold(channel.Name, "quotes")
 }
 
-// findMentionedTarget returns the first non-bot user mentioned alongside the
-// bot. Returns nil if the bot was not mentioned or no target user was found.
-func findMentionedTarget(mentions []*discordgo.User) *discordgo.User {
-	if botID == "" {
-		return nil
-	}
-
-	var (
-		botMentioned bool
-		target       *discordgo.User
-	)
+func isBotMentioned(mentions []*discordgo.User) bool {
 	for _, u := range mentions {
 		if u.ID == botID {
-			botMentioned = true
-		} else if !u.Bot && target == nil {
-			target = u
+			return true
 		}
 	}
+	return false
+}
 
-	if !botMentioned {
-		return nil
+// findMentionedTarget returns the first non-bot user mentioned alongside the
+// bot. Returns nil if no target user was found.
+func findMentionedTarget(mentions []*discordgo.User) *discordgo.User {
+	for _, u := range mentions {
+		if u.ID != botID && !u.Bot {
+			return u
+		}
 	}
-	return target
+	return nil
 }
 
 func onMessageUpdate(s *discordgo.Session, m *discordgo.MessageUpdate) {
@@ -87,6 +91,17 @@ func onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
 			log.Printf("Error marking message %s as deleted: %v", id, err)
 		}
 	}
+}
+
+func handleRepostOriginal(s *discordgo.Session, m *discordgo.MessageCreate) {
+	msg, contents, err := getMessageByID(m.MessageReference.MessageID)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "I don't have a saved version of that message.")
+		return
+	}
+
+	msg.Content = msg.OriginalContent
+	repostMessage(s, m.ChannelID, msg, contents)
 }
 
 func handleRepostLatest(s *discordgo.Session, m *discordgo.MessageCreate, target *discordgo.User) {
