@@ -68,8 +68,8 @@ func saveMessage(m *discordgo.Message) error {
 	}
 
 	_, err := db.Exec(`
-		INSERT INTO messages (id, guild_id, channel_id, user_id, username, display_name, avatar_url, content, original_content, sent_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
+		INSERT INTO messages (id, guild_id, channel_id, user_id, username, display_name, avatar_url, content, sent_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO NOTHING`,
 		m.ID, m.GuildID, m.ChannelID, m.Author.ID,
 		m.Author.Username, displayName, avatarURL,
@@ -94,8 +94,12 @@ func saveMessage(m *discordgo.Message) error {
 }
 
 func updateMessageContent(messageID, content string) error {
-	_, err := db.Exec(
-		`UPDATE messages SET content = $1, edited_at = NOW() WHERE id = $2`,
+	_, err := db.Exec(`
+		UPDATE messages
+		SET original_content = CASE WHEN original_content = '' THEN messages.content ELSE original_content END,
+		    content = $1,
+		    edited_at = NOW()
+		WHERE id = $2`,
 		content, messageID,
 	)
 	return err

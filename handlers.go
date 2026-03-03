@@ -100,7 +100,9 @@ func handleRepostOriginal(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	msg.Content = msg.OriginalContent
+	if msg.OriginalContent != "" {
+		msg.Content = msg.OriginalContent
+	}
 	repostMessage(s, m.ChannelID, msg, contents)
 }
 
