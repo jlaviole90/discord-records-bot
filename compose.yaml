@@ -11,8 +11,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: records
-    ports:
-      - "5432:5432"
     volumes:
       - /mnt/raid0/discord-records-bot/postgres-data:/var/lib/postgresql/data
     healthcheck:
