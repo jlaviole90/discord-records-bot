@@ -285,20 +285,41 @@ type Leaderboards struct {
 	Edits   []LeaderboardEntry
 }
 
-func getLeaderboards(guildID string, since *time.Time) (*Leaderboards, error) {
-	lb := &Leaderboards{}
-	var err error
-
-	timeFilter := ""
+func buildFilter(guildID, channelID string, since *time.Time) (string, []any) {
+	filter := "guild_id = $1"
 	args := []any{guildID}
+	n := 2
+
+	if channelID != "" {
+		filter += fmt.Sprintf(" AND channel_id = $%d", n)
+		args = append(args, channelID)
+		n++
+	}
+
 	if since != nil {
-		timeFilter = " AND sent_at >= $2"
+		filter += fmt.Sprintf(" AND sent_at >= $%d", n)
 		args = append(args, *since)
 	}
 
+	return filter, args
+}
+
+func getMessageCount(guildID, channelID string, since *time.Time) (int, error) {
+	filter, args := buildFilter(guildID, channelID, since)
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM messages WHERE "+filter, args...).Scan(&count)
+	return count, err
+}
+
+func getLeaderboards(guildID, channelID string, since *time.Time) (*Leaderboards, error) {
+	lb := &Leaderboards{}
+	var err error
+
+	filter, args := buildFilter(guildID, channelID, since)
+
 	lb.Active, err = queryLeaderboard(
 		`SELECT MAX(username), MAX(display_name), COUNT(*) as total, NULL
-		FROM messages WHERE guild_id = $1`+timeFilter+`
+		FROM messages WHERE `+filter+`
 		GROUP BY user_id ORDER BY total DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
@@ -307,7 +328,7 @@ func getLeaderboards(guildID string, since *time.Time) (*Leaderboards, error) {
 	lb.Deletes, err = queryLeaderboard(
 		`SELECT MAX(username), MAX(display_name), COUNT(*) as total,
 		        AVG(EXTRACT(EPOCH FROM (deleted_at - sent_at)))
-		FROM messages WHERE guild_id = $1 AND is_deleted = TRUE AND deleted_at IS NOT NULL`+timeFilter+`
+		FROM messages WHERE `+filter+` AND is_deleted = TRUE AND deleted_at IS NOT NULL
 		GROUP BY user_id ORDER BY total DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
@@ -316,7 +337,7 @@ func getLeaderboards(guildID string, since *time.Time) (*Leaderboards, error) {
 	lb.Edits, err = queryLeaderboard(
 		`SELECT MAX(username), MAX(display_name), COUNT(*) as total,
 		        AVG(EXTRACT(EPOCH FROM (edited_at - sent_at)))
-		FROM messages WHERE guild_id = $1 AND edited_at IS NOT NULL`+timeFilter+`
+		FROM messages WHERE `+filter+` AND edited_at IS NOT NULL
 		GROUP BY user_id ORDER BY total DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
@@ -345,6 +366,86 @@ func queryLeaderboard(query string, args ...any) ([]LeaderboardEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+type ChannelActivity struct {
+	ChannelID string
+	Count     int
+}
+
+func getTopChannels(guildID string, since *time.Time) ([]ChannelActivity, error) {
+	query := `SELECT channel_id, COUNT(*) as total
+		FROM messages WHERE guild_id = $1`
+	args := []any{guildID}
+
+	if since != nil {
+		query += " AND sent_at >= $2"
+		args = append(args, *since)
+	}
+
+	query += " GROUP BY channel_id ORDER BY total DESC LIMIT 10"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ChannelActivity
+	for rows.Next() {
+		var a ChannelActivity
+		if err := rows.Scan(&a.ChannelID, &a.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+func getUserChannelActivity(guildID, userID string, since *time.Time) ([]ChannelActivity, error) {
+	query := `SELECT channel_id, COUNT(*) as total
+		FROM messages WHERE guild_id = $1 AND user_id = $2`
+	args := []any{guildID, userID}
+
+	if since != nil {
+		query += " AND sent_at >= $3"
+		args = append(args, *since)
+	}
+
+	query += " GROUP BY channel_id ORDER BY total DESC LIMIT 10"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ChannelActivity
+	for rows.Next() {
+		var a ChannelActivity
+		if err := rows.Scan(&a.ChannelID, &a.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+func getUserStats(guildID, userID string, since *time.Time) (total, deletes, edits int, err error) {
+	query := `SELECT
+		COUNT(*),
+		COUNT(*) FILTER (WHERE is_deleted = TRUE),
+		COUNT(*) FILTER (WHERE edited_at IS NOT NULL)
+		FROM messages WHERE guild_id = $1 AND user_id = $2`
+	args := []any{guildID, userID}
+
+	if since != nil {
+		query += " AND sent_at >= $3"
+		args = append(args, *since)
+	}
+
+	err = db.QueryRow(query, args...).Scan(&total, &deletes, &edits)
+	return
 }
 
 func getMessageByID(messageID string) (*StoredMessage, []StoredContent, error) {

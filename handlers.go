@@ -11,6 +11,7 @@ import (
 )
 
 const timestampFmt = "Jan 2, 3:04 PM"
+const noMessagesYet = "*No messages recorded yet.*\n"
 
 func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author == nil || m.Author.Bot || m.Author.System || m.GuildID == "" {
@@ -55,8 +56,7 @@ func dispatchCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.Contains(lower, "leaderboard") || strings.Contains(lower, "cowards") || strings.Contains(lower, "stats") {
-		since, label := parseLeaderboardTime(lower)
-		handleLeaderboard(s, m, since, label)
+		dispatchLeaderboard(s, m, lower)
 		return
 	}
 
@@ -72,6 +72,27 @@ func dispatchCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	} else {
 		handleRepostLatest(s, m, target)
 	}
+}
+
+func dispatchLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, lower string) {
+	since, label := parseLeaderboardTime(lower)
+
+	if strings.Contains(lower, "channels") {
+		handleTopChannels(s, m, since, label)
+		return
+	}
+
+	if chID := parseChannelMention(m.Content); chID != "" {
+		handleChannelLeaderboard(s, m, chID, since, label)
+		return
+	}
+
+	if target := findMentionedTarget(m.Mentions); target != nil {
+		handleUserLeaderboard(s, m, target, since, label)
+		return
+	}
+
+	handleLeaderboard(s, m, since, label)
 }
 
 func isQuotesChannel(s *discordgo.Session, channelID string) bool {
@@ -369,7 +390,10 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
 		"**Summaries**\n" +
 		"📜 `@bot tldr [hours]` — AI summary of the last N hours (default: 1, max: 24)\n\n" +
 		"**Leaderboards**\n" +
-		"📊 `@bot leaderboard [time]` — Most active, most deletes, most edits\n" +
+		"📊 `@bot leaderboard [time]` — Server-wide leaderboards\n" +
+		"📊 `@bot leaderboard #channel [time]` — Leaderboards for a specific channel\n" +
+		"📊 `@bot leaderboard @user [time]` — A user's most active channels\n" +
+		"📊 `@bot channels leaderboard [time]` — Top channels by message count\n" +
 		"  Time options: `all` (default), `3 hours`, `7 days`, `2 months`\n" +
 		"  Shortcuts: `h`, `d`, `m` — e.g. `@bot leaderboard 24 h`\n\n" +
 		"**Meta**\n" +
@@ -413,19 +437,114 @@ func parseLeaderboardTime(lower string) (*time.Time, string) {
 	return nil, "All Time"
 }
 
+func parseChannelMention(content string) string {
+	idx := strings.Index(content, "<#")
+	if idx == -1 {
+		return ""
+	}
+	end := strings.Index(content[idx:], ">")
+	if end == -1 {
+		return ""
+	}
+	id := content[idx+2 : idx+end]
+	for _, c := range id {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return id
+}
+
 func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, since *time.Time, label string) {
-	lb, err := getLeaderboards(m.GuildID, since)
+	total, _ := getMessageCount(m.GuildID, "", since)
+	lb, err := getLeaderboards(m.GuildID, "", since)
 	if err != nil {
 		log.Printf("Error fetching leaderboards: %v", err)
 		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching the leaderboards.")
 		return
 	}
 
-	msg := fmt.Sprintf("📊 **Server Leaderboards — %s**\n", label)
+	msg := fmt.Sprintf("📊 **Server Leaderboards — %s** (%d messages)\n", label, total)
+	msg += formatLeaderboardBody(lb)
+	s.ChannelMessageSend(m.ChannelID, msg)
+}
+
+func handleTopChannels(s *discordgo.Session, m *discordgo.MessageCreate, since *time.Time, label string) {
+	total, _ := getMessageCount(m.GuildID, "", since)
+	channels, err := getTopChannels(m.GuildID, since)
+	if err != nil {
+		log.Printf("Error fetching top channels: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching channel stats.")
+		return
+	}
+
+	msg := fmt.Sprintf("📊 **Top Channels — %s** (%d messages)\n\n", label, total)
+
+	if len(channels) == 0 {
+		msg += noMessagesYet
+	} else {
+		for i, ch := range channels {
+			msg += fmt.Sprintf("%s <#%s> — %d messages\n", formatRank(i+1), ch.ChannelID, ch.Count)
+		}
+	}
+
+	s.ChannelMessageSend(m.ChannelID, msg)
+}
+
+func handleChannelLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, channelID string, since *time.Time, label string) {
+	total, _ := getMessageCount(m.GuildID, channelID, since)
+	lb, err := getLeaderboards(m.GuildID, channelID, since)
+	if err != nil {
+		log.Printf("Error fetching channel leaderboards: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching the leaderboards.")
+		return
+	}
+
+	msg := fmt.Sprintf("📊 **<#%s> Leaderboards — %s** (%d messages)\n", channelID, label, total)
+	msg += formatLeaderboardBody(lb)
+	s.ChannelMessageSend(m.ChannelID, msg)
+}
+
+func handleUserLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, target *discordgo.User, since *time.Time, label string) {
+	total, deletes, edits, err := getUserStats(m.GuildID, target.ID, since)
+	if err != nil {
+		log.Printf("Error fetching user stats: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching user stats.")
+		return
+	}
+
+	dn := target.GlobalName
+	if dn == "" {
+		dn = target.Username
+	}
+
+	msg := fmt.Sprintf("📊 **%s — %s** (%d messages, %d deletes, %d edits)\n\n", dn, label, total, deletes, edits)
+
+	channels, err := getUserChannelActivity(m.GuildID, target.ID, since)
+	if err != nil {
+		log.Printf("Error fetching user channel activity: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching channel activity.")
+		return
+	}
+
+	if len(channels) == 0 {
+		msg += noMessagesYet
+	} else {
+		msg += "📍 **Most Active Channels**\n"
+		for i, ch := range channels {
+			msg += fmt.Sprintf("%s <#%s> — %d messages\n", formatRank(i+1), ch.ChannelID, ch.Count)
+		}
+	}
+
+	s.ChannelMessageSend(m.ChannelID, msg)
+}
+
+func formatLeaderboardBody(lb *Leaderboards) string {
+	var msg string
 
 	msg += "\n💬 **Most Active**\n"
 	if len(lb.Active) == 0 {
-		msg += "*No messages recorded yet.*\n"
+		msg += noMessagesYet
 	}
 	for i, e := range lb.Active {
 		msg += fmt.Sprintf("%s **%s** — %d messages\n", formatRank(i+1), displayName(e), e.Count)
@@ -447,7 +566,7 @@ func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, since *
 		msg += fmt.Sprintf("%s **%s** — %d edits (avg. %s)\n", formatRank(i+1), displayName(e), e.Count, formatDuration(e.AvgSeconds))
 	}
 
-	s.ChannelMessageSend(m.ChannelID, msg)
+	return msg
 }
 
 func displayName(e LeaderboardEntry) string {

@@ -33,17 +33,25 @@ Rate limits apply: 1 use per hour per channel, 5 uses per hour globally per user
 
 | Command | Example | Description |
 |---|---|---|
-| **Leaderboard** | `@bot leaderboard` | All-time server leaderboards |
+| **Server leaderboard** | `@bot leaderboard` | All-time server leaderboards (total message count in title) |
 |  | `@bot leaderboard all` | Same as above (explicit all-time) |
 |  | `@bot leaderboard 3 hours` | Leaderboard for the past 3 hours |
 |  | `@bot leaderboard 7 days` | Leaderboard for the past 7 days |
 |  | `@bot leaderboard 2 months` | Leaderboard for the past 2 months |
 |  | `@bot leaderboard 24 h` | Shorthand — `h`, `d`, `m` accepted |
+| **Channel leaderboard** | `@bot leaderboard #general` | Leaderboards scoped to a specific channel |
+|  | `@bot leaderboard #general 7 d` | Channel leaderboard with time filter |
+| **User leaderboard** | `@bot leaderboard @user` | Shows which channels a user is most active in |
+|  | `@bot leaderboard @user 30 d` | User activity with time filter |
+| **Top channels** | `@bot channels leaderboard` | Ranks channels by total message count |
+|  | `@bot channels leaderboard 7 d` | Top channels with time filter |
 
-Also triggered by `cowards` or `stats`. Displays top 5 for:
+Also triggered by `cowards` or `stats`. Server and channel leaderboards display top 5 for:
 - **Most Active** — total messages sent
 - **Most Regretful** — total deletes with average time-to-delete
 - **Second Thoughts** — total edits with average time-to-edit
+
+User leaderboards display top 10 most active channels with total messages, deletes, and edits.
 
 ### Admin
 
@@ -52,7 +60,6 @@ Also triggered by `cowards` or `stats`. Displays top 5 for:
 | **Backfill** | `@bot backfill` | Retroactively fetch and archive all messages from every accessible text channel in the server |
 
 The backfill command:
-- Requires **server administrator** permissions
 - Only one backfill can run per server at a time
 - Skips bot/system messages and the `quotes` channel
 - Posts progress updates per channel and a final summary
