@@ -45,6 +45,22 @@ Also triggered by `cowards` or `stats`. Displays top 5 for:
 - **Most Regretful** — total deletes with average time-to-delete
 - **Second Thoughts** — total edits with average time-to-edit
 
+### Admin
+
+| Command | Example | Description |
+|---|---|---|
+| **Backfill** | `@bot backfill` | Retroactively fetch and archive all messages from every accessible text channel in the server |
+
+The backfill command:
+- Requires **server administrator** permissions
+- Only one backfill can run per server at a time
+- Skips bot/system messages and the `quotes` channel
+- Posts progress updates per channel and a final summary
+- Safely skips messages already in the database (deduplication via `ON CONFLICT`)
+- Runs in the background — the bot remains usable during backfill
+
+> **Note:** Deleted and edited message history cannot be recovered retroactively. Only the current state of each message (as Discord returns it) is stored.
+
 ### Meta
 
 | Command | Example | Description |
@@ -62,6 +78,7 @@ Every repost appears as if the original user sent it — the bot creates a tempo
 - **Delete tracking** — When a message is deleted, it is marked as deleted with a timestamp. The content remains in the database for retrieval.
 - **TLDR summaries** — When invoked with `tldr`, the bot queries recent messages from the database, builds a timestamped transcript, and sends it to Google Gemini for summarization. The transcript is capped at 16,000 characters to control API costs. Requires a Gemini API key; the feature is silently disabled without one.
 - **Leaderboards** — Aggregated stats for the server, filterable by time window (hours, days, months, or all-time). Queries count messages, deletes, and edits per user, with average reaction times.
+- **Backfill** — An admin-only command that retroactively fetches and archives all message history from every text channel in the server. Paginates through the Discord API (100 messages at a time), respects rate limits, and deduplicates against existing records. Progress is reported per channel.
 - **Disk monitoring** — A background goroutine checks RAID disk usage hourly and sends a warning to a `bot-alerts` channel (configurable) when usage exceeds a threshold.
 
 ---

@@ -49,6 +49,11 @@ func dispatchCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	if strings.Contains(lower, "backfill") {
+		handleBackfill(s, m)
+		return
+	}
+
 	if strings.Contains(lower, "leaderboard") || strings.Contains(lower, "cowards") || strings.Contains(lower, "stats") {
 		since, label := parseLeaderboardTime(lower)
 		handleLeaderboard(s, m, since, label)
