@@ -10,12 +10,46 @@ Built with Go and [discordgo](https://github.com/bwmarrin/discordgo). Stores dat
 
 All commands work by **mentioning the bot** (`@RecordsBot`) in a message.
 
-| Action | How to invoke | What it does |
+### Message Reposting
+
+| Command | Example | Description |
 |---|---|---|
-| **Repost latest message** | `@RecordsBot @user` | Reposts the mentioned user's most recent message in the current channel |
-| **Repost deleted message** | `@RecordsBot @user 🗑️` | Reposts the mentioned user's most recently deleted message in the current channel |
-| **Retrieve original (pre-edit)** | Reply to any message and tag `@RecordsBot` | Reposts the saved original version of the replied-to message, before any edits |
-| **TLDR summary** | `@RecordsBot tldr 2` | Summarizes the last 2 hours of conversation in the current channel using Gemini AI (1–24 hours, defaults to 1) |
+| **Repost latest** | `@bot @user` | Reposts the mentioned user's most recent message in this channel |
+| **Repost deleted** | `@bot @user deleted [N]` | Reposts the user's last N deleted messages (default: 1) |
+|  | `@bot @user 🗑️ [N]` | Same as above, using the trash emoji |
+| **View edit history** | Reply + `@bot original` | Shows the full edit history of the replied-to message (all versions chronologically) |
+|  | Reply + `@bot unedited` | Same as above |
+
+### Summaries
+
+| Command | Example | Description |
+|---|---|---|
+| **TLDR** | `@bot tldr` | AI summary of the last hour of conversation |
+|  | `@bot tldr 6` | Summarize the last 6 hours (max: 24) |
+
+Rate limits apply: 1 use per hour per channel, 5 uses per hour globally per user (configurable).
+
+### Leaderboards
+
+| Command | Example | Description |
+|---|---|---|
+| **Leaderboard** | `@bot leaderboard` | All-time server leaderboards |
+|  | `@bot leaderboard all` | Same as above (explicit all-time) |
+|  | `@bot leaderboard 3 hours` | Leaderboard for the past 3 hours |
+|  | `@bot leaderboard 7 days` | Leaderboard for the past 7 days |
+|  | `@bot leaderboard 2 months` | Leaderboard for the past 2 months |
+|  | `@bot leaderboard 24 h` | Shorthand — `h`, `d`, `m` accepted |
+
+Also triggered by `cowards` or `stats`. Displays top 5 for:
+- **Most Active** — total messages sent
+- **Most Regretful** — total deletes with average time-to-delete
+- **Second Thoughts** — total edits with average time-to-edit
+
+### Meta
+
+| Command | Example | Description |
+|---|---|---|
+| **Help** | `@bot help` | Show the in-chat command reference |
 
 Every repost appears as if the original user sent it — the bot creates a temporary webhook with their username, display name, and avatar, then cleans it up immediately.
 
@@ -24,9 +58,10 @@ Every repost appears as if the original user sent it — the bot creates a tempo
 ## How It Works
 
 - **Message recording** — Every non-bot message is stored in PostgreSQL as it arrives (text content + attachment metadata). Messages in a channel named `quotes` are excluded.
-- **Edit tracking** — When a message is edited for the first time, the original content is snapshotted into a separate column. The current content is updated in place. Subsequent edits do not overwrite the snapshot, so the pre-edit original is always preserved.
+- **Edit tracking** — When a message is edited, the previous content is saved to a `message_edits` table before updating. The full chronological edit history is preserved and displayed when requested. The `original_content` column on `messages` holds the very first version as a quick-access snapshot.
 - **Delete tracking** — When a message is deleted, it is marked as deleted with a timestamp. The content remains in the database for retrieval.
 - **TLDR summaries** — When invoked with `tldr`, the bot queries recent messages from the database, builds a timestamped transcript, and sends it to Google Gemini for summarization. The transcript is capped at 16,000 characters to control API costs. Requires a Gemini API key; the feature is silently disabled without one.
+- **Leaderboards** — Aggregated stats for the server, filterable by time window (hours, days, months, or all-time). Queries count messages, deletes, and edits per user, with average reaction times.
 - **Disk monitoring** — A background goroutine checks RAID disk usage hourly and sends a warning to a `bot-alerts` channel (configurable) when usage exceeds a threshold.
 
 ---
@@ -102,6 +137,9 @@ All configuration is done through environment variables in `compose.yaml` (or a 
 | `DISK_WARN_CHANNEL` | `bot-alerts` | Channel name where disk space warnings are sent |
 | `GEMINI_API_KEY` | — | Google Gemini API key (direct value) |
 | `GEMINI_API_KEY_FILE` | — | Path to a file containing the Gemini API key (Docker secrets) |
+| `GEMINI_MODEL` | `gemini-2.0-flash-lite` | Gemini model to use for TLDR summaries |
+| `TLDR_CHANNEL_LIMIT` | `1` | Max TLDR uses per hour, per channel, per user |
+| `TLDR_GLOBAL_LIMIT` | `5` | Max TLDR uses per hour globally, per user |
 
 ---
 
@@ -152,6 +190,28 @@ All configuration is done through environment variables in `compose.yaml` (or a 
 | `content` | `TEXT` | Reserved for future use |
 | `filename` | `TEXT` | Original filename |
 | `url` | `TEXT` | Discord CDN URL |
+
+**`message_edits`** — Chronological edit history for each message.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `SERIAL` PK | Auto-increment ID |
+| `message_id` | `TEXT` FK | References `messages.id` (cascading delete) |
+| `content` | `TEXT` | Message text at that point in time |
+| `version_at` | `TIMESTAMPTZ` | When this version existed |
+
+**`tldr_usages`** — Audit log for TLDR rate limiting.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `SERIAL` PK | Auto-increment ID |
+| `user_id` | `TEXT` | User who invoked TLDR |
+| `username` | `TEXT` | Username at time of use |
+| `channel_id` | `TEXT` | Channel where it was used |
+| `guild_id` | `TEXT` | Server ID |
+| `hours_requested` | `INT` | Number of hours requested |
+| `message_count` | `INT` | Messages included in summary |
+| `used_at` | `TIMESTAMPTZ` | When the command was used |
 
 > **Note:** Discord CDN URLs for attachments expire and are invalidated when the original message is deleted. Attachment URLs for deleted messages may no longer resolve.
 

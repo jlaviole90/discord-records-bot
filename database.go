@@ -285,14 +285,21 @@ type Leaderboards struct {
 	Edits   []LeaderboardEntry
 }
 
-func getLeaderboards(guildID string) (*Leaderboards, error) {
+func getLeaderboards(guildID string, since *time.Time) (*Leaderboards, error) {
 	lb := &Leaderboards{}
 	var err error
 
+	timeFilter := ""
+	args := []any{guildID}
+	if since != nil {
+		timeFilter = " AND sent_at >= $2"
+		args = append(args, *since)
+	}
+
 	lb.Active, err = queryLeaderboard(
 		`SELECT MAX(username), MAX(display_name), COUNT(*) as total, NULL
-		FROM messages WHERE guild_id = $1
-		GROUP BY user_id ORDER BY total DESC LIMIT 5`, guildID)
+		FROM messages WHERE guild_id = $1`+timeFilter+`
+		GROUP BY user_id ORDER BY total DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -300,8 +307,8 @@ func getLeaderboards(guildID string) (*Leaderboards, error) {
 	lb.Deletes, err = queryLeaderboard(
 		`SELECT MAX(username), MAX(display_name), COUNT(*) as total,
 		        AVG(EXTRACT(EPOCH FROM (deleted_at - sent_at)))
-		FROM messages WHERE guild_id = $1 AND is_deleted = TRUE AND deleted_at IS NOT NULL
-		GROUP BY user_id ORDER BY total DESC LIMIT 5`, guildID)
+		FROM messages WHERE guild_id = $1 AND is_deleted = TRUE AND deleted_at IS NOT NULL`+timeFilter+`
+		GROUP BY user_id ORDER BY total DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -309,8 +316,8 @@ func getLeaderboards(guildID string) (*Leaderboards, error) {
 	lb.Edits, err = queryLeaderboard(
 		`SELECT MAX(username), MAX(display_name), COUNT(*) as total,
 		        AVG(EXTRACT(EPOCH FROM (edited_at - sent_at)))
-		FROM messages WHERE guild_id = $1 AND edited_at IS NOT NULL
-		GROUP BY user_id ORDER BY total DESC LIMIT 5`, guildID)
+		FROM messages WHERE guild_id = $1 AND edited_at IS NOT NULL`+timeFilter+`
+		GROUP BY user_id ORDER BY total DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -318,8 +325,8 @@ func getLeaderboards(guildID string) (*Leaderboards, error) {
 	return lb, nil
 }
 
-func queryLeaderboard(query, guildID string) ([]LeaderboardEntry, error) {
-	rows, err := db.Query(query, guildID)
+func queryLeaderboard(query string, args ...any) ([]LeaderboardEntry, error) {
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

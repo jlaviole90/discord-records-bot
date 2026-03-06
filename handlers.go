@@ -50,7 +50,8 @@ func dispatchCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.Contains(lower, "leaderboard") || strings.Contains(lower, "cowards") || strings.Contains(lower, "stats") {
-		handleLeaderboard(s, m)
+		since, label := parseLeaderboardTime(lower)
+		handleLeaderboard(s, m, since, label)
 		return
 	}
 
@@ -363,21 +364,59 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
 		"**Summaries**\n" +
 		"📜 `@bot tldr [hours]` — AI summary of the last N hours (default: 1, max: 24)\n\n" +
 		"**Leaderboards**\n" +
-		"📊 `@bot leaderboard` — Most active, most deletes, most edits (with avg reaction times)\n\n" +
+		"📊 `@bot leaderboard [time]` — Most active, most deletes, most edits\n" +
+		"  Time options: `all` (default), `3 hours`, `7 days`, `2 months`\n" +
+		"  Shortcuts: `h`, `d`, `m` — e.g. `@bot leaderboard 24 h`\n\n" +
 		"**Meta**\n" +
 		"❓ `@bot help` — Show this message"
 	s.ChannelMessageSend(m.ChannelID, help)
 }
 
-func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate) {
-	lb, err := getLeaderboards(m.GuildID)
+// parseLeaderboardTime extracts an optional time window from the message.
+// Returns nil for "all time" and a human-readable label for the header.
+func parseLeaderboardTime(lower string) (*time.Time, string) {
+	if strings.Contains(lower, "all") {
+		return nil, "All Time"
+	}
+
+	// Find a number followed by a unit keyword
+	fields := strings.Fields(lower)
+	for i, f := range fields {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 1 {
+			continue
+		}
+
+		unit := ""
+		if i+1 < len(fields) {
+			unit = fields[i+1]
+		}
+
+		switch {
+		case strings.HasPrefix(unit, "h"):
+			t := time.Now().Add(-time.Duration(n) * time.Hour)
+			return &t, fmt.Sprintf("Last %d hour(s)", n)
+		case strings.HasPrefix(unit, "d"):
+			t := time.Now().Add(-time.Duration(n) * 24 * time.Hour)
+			return &t, fmt.Sprintf("Last %d day(s)", n)
+		case strings.HasPrefix(unit, "m"):
+			t := time.Now().AddDate(0, -n, 0)
+			return &t, fmt.Sprintf("Last %d month(s)", n)
+		}
+	}
+
+	return nil, "All Time"
+}
+
+func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, since *time.Time, label string) {
+	lb, err := getLeaderboards(m.GuildID, since)
 	if err != nil {
 		log.Printf("Error fetching leaderboards: %v", err)
 		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching the leaderboards.")
 		return
 	}
 
-	msg := "📊 **Server Leaderboards**\n"
+	msg := fmt.Sprintf("📊 **Server Leaderboards — %s**\n", label)
 
 	msg += "\n💬 **Most Active**\n"
 	if len(lb.Active) == 0 {
