@@ -225,6 +225,74 @@ func recordTLDRUsage(userID, username, channelID, guildID string, hoursRequested
 	return err
 }
 
+type LeaderboardEntry struct {
+	Username    string
+	DisplayName string
+	Count       int
+	AvgSeconds  float64
+}
+
+type Leaderboards struct {
+	Active  []LeaderboardEntry
+	Deletes []LeaderboardEntry
+	Edits   []LeaderboardEntry
+}
+
+func getLeaderboards(guildID string) (*Leaderboards, error) {
+	lb := &Leaderboards{}
+	var err error
+
+	lb.Active, err = queryLeaderboard(
+		`SELECT MAX(username), MAX(display_name), COUNT(*) as total, NULL
+		FROM messages WHERE guild_id = $1
+		GROUP BY user_id ORDER BY total DESC LIMIT 5`, guildID)
+	if err != nil {
+		return nil, err
+	}
+
+	lb.Deletes, err = queryLeaderboard(
+		`SELECT MAX(username), MAX(display_name), COUNT(*) as total,
+		        AVG(EXTRACT(EPOCH FROM (deleted_at - sent_at)))
+		FROM messages WHERE guild_id = $1 AND is_deleted = TRUE AND deleted_at IS NOT NULL
+		GROUP BY user_id ORDER BY total DESC LIMIT 5`, guildID)
+	if err != nil {
+		return nil, err
+	}
+
+	lb.Edits, err = queryLeaderboard(
+		`SELECT MAX(username), MAX(display_name), COUNT(*) as total,
+		        AVG(EXTRACT(EPOCH FROM (edited_at - sent_at)))
+		FROM messages WHERE guild_id = $1 AND edited_at IS NOT NULL
+		GROUP BY user_id ORDER BY total DESC LIMIT 5`, guildID)
+	if err != nil {
+		return nil, err
+	}
+
+	return lb, nil
+}
+
+func queryLeaderboard(query, guildID string) ([]LeaderboardEntry, error) {
+	rows, err := db.Query(query, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []LeaderboardEntry
+	for rows.Next() {
+		var e LeaderboardEntry
+		var avgSecs sql.NullFloat64
+		if err := rows.Scan(&e.Username, &e.DisplayName, &e.Count, &avgSecs); err != nil {
+			return nil, err
+		}
+		if avgSecs.Valid {
+			e.AvgSeconds = avgSecs.Float64
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
 func getMessageByID(messageID string) (*StoredMessage, []StoredContent, error) {
 	msg := &StoredMessage{}
 	err := db.QueryRow(`

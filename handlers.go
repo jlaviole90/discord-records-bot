@@ -32,8 +32,20 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	lower := strings.ToLower(m.Content)
+
+	if strings.Contains(lower, "help") {
+		handleHelp(s, m)
+		return
+	}
+
 	if hours, ok := parseTLDR(m.Content); ok {
 		handleTLDR(s, m, hours)
+		return
+	}
+
+	if strings.Contains(lower, "leaderboard") || strings.Contains(lower, "cowards") || strings.Contains(lower, "stats") {
+		handleLeaderboard(s, m)
 		return
 	}
 
@@ -251,5 +263,94 @@ func cleanupWebhook(s *discordgo.Session, channelID string, wh *discordgo.Webhoo
 		log.Printf("Error deleting webhook %s: %v", wh.Name, err)
 		s.ChannelMessageSend(channelID,
 			fmt.Sprintf("Could not delete webhook **%s**. You may want to delete it manually.", wh.Name))
+	}
+}
+
+func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
+	help := "📋 **Records Bot — Commands**\n\n" +
+		"**Message Reposting**\n" +
+		"• `@bot @user` — Repost their latest message in this channel\n" +
+		"• `@bot @user 🗑️` — Repost their latest deleted message\n" +
+		"• `Reply + @bot` — Repost the original pre-edit version of a message\n\n" +
+		"**Summaries**\n" +
+		"• `@bot tldr [hours]` — AI summary of the last N hours (default: 1, max: 24)\n\n" +
+		"**Leaderboards**\n" +
+		"• `@bot leaderboard` — Most active, most deletes, most edits (with avg reaction times)\n\n" +
+		"**Meta**\n" +
+		"• `@bot help` — Show this message"
+	s.ChannelMessageSend(m.ChannelID, help)
+}
+
+func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate) {
+	lb, err := getLeaderboards(m.GuildID)
+	if err != nil {
+		log.Printf("Error fetching leaderboards: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching the leaderboards.")
+		return
+	}
+
+	msg := "📊 **Server Leaderboards**\n"
+
+	msg += "\n💬 **Most Active**\n"
+	if len(lb.Active) == 0 {
+		msg += "*No messages recorded yet.*\n"
+	}
+	for i, e := range lb.Active {
+		msg += fmt.Sprintf("%s **%s** — %d messages\n", formatRank(i+1), displayName(e), e.Count)
+	}
+
+	msg += "\n🗑️ **Most Regretful** (deletes)\n"
+	if len(lb.Deletes) == 0 {
+		msg += "*No deleted messages yet. Everyone's clean... for now.*\n"
+	}
+	for i, e := range lb.Deletes {
+		msg += fmt.Sprintf("%s **%s** — %d deletes (avg. %s)\n", formatRank(i+1), displayName(e), e.Count, formatDuration(e.AvgSeconds))
+	}
+
+	msg += "\n✏️ **Second Thoughts** (edits)\n"
+	if len(lb.Edits) == 0 {
+		msg += "*No edited messages yet. Everyone says what they mean, apparently.*\n"
+	}
+	for i, e := range lb.Edits {
+		msg += fmt.Sprintf("%s **%s** — %d edits (avg. %s)\n", formatRank(i+1), displayName(e), e.Count, formatDuration(e.AvgSeconds))
+	}
+
+	s.ChannelMessageSend(m.ChannelID, msg)
+}
+
+func displayName(e LeaderboardEntry) string {
+	if e.DisplayName != "" {
+		return e.DisplayName
+	}
+	return e.Username
+}
+
+func formatRank(n int) string {
+	switch n {
+	case 1:
+		return "🥇"
+	case 2:
+		return "🥈"
+	case 3:
+		return "🥉"
+	default:
+		return fmt.Sprintf("`%d.`", n)
+	}
+}
+
+func formatDuration(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	d := time.Duration(seconds * float64(time.Second))
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd %dh", int(d.Hours())/24, int(d.Hours())%24)
 	}
 }
