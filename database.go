@@ -94,16 +94,56 @@ func saveMessage(m *discordgo.Message) error {
 	return nil
 }
 
+type EditVersion struct {
+	Content   string
+	VersionAt time.Time
+}
+
 func updateMessageContent(messageID, content string) error {
 	_, err := db.Exec(`
+		INSERT INTO message_edits (message_id, content, version_at)
+		SELECT $1, content, COALESCE(edited_at, sent_at)
+		FROM messages
+		WHERE id = $1 AND content != $2`,
+		messageID, content,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
 		UPDATE messages
-		SET original_content = CASE WHEN original_content = '' THEN messages.content ELSE original_content END,
+		SET original_content = CASE WHEN original_content = '' THEN content ELSE original_content END,
 		    content = $1,
 		    edited_at = NOW()
 		WHERE id = $2`,
 		content, messageID,
 	)
 	return err
+}
+
+func getEditHistory(messageID string) ([]EditVersion, error) {
+	rows, err := db.Query(`
+		SELECT content, version_at
+		FROM message_edits
+		WHERE message_id = $1
+		ORDER BY version_at ASC`,
+		messageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []EditVersion
+	for rows.Next() {
+		var v EditVersion
+		if err := rows.Scan(&v.Content, &v.VersionAt); err != nil {
+			return nil, err
+		}
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
 }
 
 func markMessageDeleted(messageID string) error {

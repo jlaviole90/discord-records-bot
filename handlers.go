@@ -10,6 +10,8 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+const timestampFmt = "Jan 2, 3:04 PM"
+
 func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author == nil || m.Author.Bot || m.Author.System || m.GuildID == "" {
 		return
@@ -23,10 +25,12 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		log.Printf("Error saving message %s: %v", m.ID, err)
 	}
 
-	if !isBotMentioned(m.Mentions) {
-		return
+	if isBotMentioned(m.Mentions) {
+		dispatchCommand(s, m)
 	}
+}
 
+func dispatchCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 	lower := strings.ToLower(m.Content)
 
 	if m.MessageReference != nil && m.MessageReference.MessageID != "" &&
@@ -190,10 +194,43 @@ func handleRepostOriginal(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if msg.OriginalContent != "" {
-		msg.Content = msg.OriginalContent
+	edits, _ := getEditHistory(msg.ID)
+	if len(edits) == 0 {
+		repostMessage(s, m.ChannelID, msg, contents)
+		return
 	}
-	repostMessage(s, m.ChannelID, msg, contents)
+
+	dn := msg.DisplayName
+	if dn == "" {
+		dn = msg.Username
+	}
+
+	reply := fmt.Sprintf("✏️ **Edit History for %s**\n\n", dn)
+	for i, v := range edits {
+		if i == 0 {
+			reply += fmt.Sprintf("**Original** (%s):\n%s\n\n",
+				v.VersionAt.Format(timestampFmt), blockquote(v.Content))
+		} else {
+			reply += fmt.Sprintf("**Edit %d** (%s):\n%s\n\n",
+				i, v.VersionAt.Format(timestampFmt), blockquote(v.Content))
+		}
+	}
+	reply += fmt.Sprintf("**Current** (%s):\n%s",
+		msg.EditedAt.Format(timestampFmt), blockquote(msg.Content))
+
+	if len(reply) > 2000 {
+		reply = reply[:1997] + "..."
+	}
+
+	s.ChannelMessageSend(m.ChannelID, reply)
+}
+
+func blockquote(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = "> " + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 func handleRepostLatest(s *discordgo.Session, m *discordgo.MessageCreate, target *discordgo.User) {

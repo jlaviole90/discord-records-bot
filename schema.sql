@@ -35,6 +35,16 @@ CREATE INDEX IF NOT EXISTS idx_messages_deleted
 CREATE INDEX IF NOT EXISTS idx_message_contents_msg
     ON message_contents(message_id);
 
+CREATE TABLE IF NOT EXISTS message_edits (
+    id SERIAL PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    version_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_edits_msg
+    ON message_edits(message_id, version_at ASC);
+
 CREATE TABLE IF NOT EXISTS tldr_usages (
     id SERIAL PRIMARY KEY,
     user_id TEXT NOT NULL,
