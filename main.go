@@ -46,6 +46,11 @@ func main() {
 		log.Println("Warning: No Gemini API key configured. TLDR feature will be disabled.")
 	}
 
+	if m := os.Getenv("GEMINI_MODEL"); m != "" {
+		geminiModel = m
+	}
+	log.Printf("Gemini model: %s", geminiModel)
+
 	tldrChannelLimitPerHr = envInt("TLDR_CHANNEL_LIMIT", 1)
 	tldrGlobalLimitPerHr = envInt("TLDR_GLOBAL_LIMIT", 5)
 

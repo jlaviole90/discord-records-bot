@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	geminiModel     = "gemini-2.0-flash"
-	geminiEndpoint  = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent"
+	geminiBaseURL   = "https://generativelanguage.googleapis.com/v1beta/models/"
 	maxPayloadChars = 16_000
 )
+
+var geminiModel = "gemini-2.0-flash-lite"
 
 type geminiRequest struct {
 	Contents []geminiContent `json:"contents"`
@@ -63,7 +64,7 @@ func summarizeMessages(apiKey string, messages []ChatLine, hours int) (string, e
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s?key=%s", geminiEndpoint, apiKey)
+	url := fmt.Sprintf("%s%s:generateContent?key=%s", geminiBaseURL, geminiModel, apiKey)
 	client := &http.Client{Timeout: 60 * time.Second}
 
 	resp, err := client.Post(url, "application/json", bytes.NewReader(jsonData))
