@@ -27,12 +27,13 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if m.MessageReference != nil && m.MessageReference.MessageID != "" {
+	lower := strings.ToLower(m.Content)
+
+	if m.MessageReference != nil && m.MessageReference.MessageID != "" &&
+		(strings.Contains(lower, "original") || strings.Contains(lower, "unedited")) {
 		handleRepostOriginal(s, m)
 		return
 	}
-
-	lower := strings.ToLower(m.Content)
 
 	if strings.Contains(lower, "help") {
 		handleHelp(s, m)
@@ -54,7 +55,8 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if strings.Contains(m.Content, "🗑️") || strings.Contains(m.Content, "🗑") {
+	if strings.Contains(m.Content, "🗑️") || strings.Contains(m.Content, "🗑") ||
+		strings.Contains(lower, "deleted") || strings.Contains(lower, "delete") {
 		handleRepostDeleted(s, m, target)
 	} else {
 		handleRepostLatest(s, m, target)
@@ -269,15 +271,15 @@ func cleanupWebhook(s *discordgo.Session, channelID string, wh *discordgo.Webhoo
 func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
 	help := "📋 **Records Bot — Commands**\n\n" +
 		"**Message Reposting**\n" +
-		"• `@bot @user` — Repost their latest message in this channel\n" +
-		"• `@bot @user 🗑️` — Repost their latest deleted message\n" +
-		"• `Reply + @bot` — Repost the original pre-edit version of a message\n\n" +
+		"💬 `@bot @user` — Repost their latest message in this channel\n" +
+		"🗑️ `@bot @user deleted` or `@bot @user 🗑️` — Repost their latest deleted message\n" +
+		"✏️ `Reply to a message + @bot original` — Repost the original pre-edit version\n\n" +
 		"**Summaries**\n" +
-		"• `@bot tldr [hours]` — AI summary of the last N hours (default: 1, max: 24)\n\n" +
+		"📜 `@bot tldr [hours]` — AI summary of the last N hours (default: 1, max: 24)\n\n" +
 		"**Leaderboards**\n" +
-		"• `@bot leaderboard` — Most active, most deletes, most edits (with avg reaction times)\n\n" +
+		"📊 `@bot leaderboard` — Most active, most deletes, most edits (with avg reaction times)\n\n" +
 		"**Meta**\n" +
-		"• `@bot help` — Show this message"
+		"❓ `@bot help` — Show this message"
 	s.ChannelMessageSend(m.ChannelID, help)
 }
 
