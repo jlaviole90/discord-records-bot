@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	_ "embed"
+	"fmt"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -157,6 +158,71 @@ func getLatestDeletedMessage(channelID, userID string) (*StoredMessage, []Stored
 
 	contents, err := getMessageContents(msg.ID)
 	return msg, contents, err
+}
+
+func getRecentMessages(channelID string, since time.Time) ([]ChatLine, error) {
+	rows, err := db.Query(`
+		SELECT username, display_name, content, sent_at
+		FROM messages
+		WHERE channel_id = $1 AND sent_at >= $2
+		ORDER BY sent_at ASC`,
+		channelID, since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var lines []ChatLine
+	for rows.Next() {
+		var l ChatLine
+		if err := rows.Scan(&l.Username, &l.DisplayName, &l.Content, &l.SentAt); err != nil {
+			return nil, err
+		}
+		lines = append(lines, l)
+	}
+	return lines, rows.Err()
+}
+
+func checkTLDRRateLimit(userID, channelID string) (string, error) {
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+
+	var channelCount int
+	err := db.QueryRow(`
+		SELECT COUNT(*) FROM tldr_usages
+		WHERE user_id = $1 AND channel_id = $2 AND used_at >= $3`,
+		userID, channelID, oneHourAgo,
+	).Scan(&channelCount)
+	if err != nil {
+		return "", err
+	}
+	if channelCount >= tldrChannelLimitPerHr {
+		return fmt.Sprintf("You can only use TLDR %d time(s) per hour in this channel.", tldrChannelLimitPerHr), nil
+	}
+
+	var globalCount int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM tldr_usages
+		WHERE user_id = $1 AND used_at >= $2`,
+		userID, oneHourAgo,
+	).Scan(&globalCount)
+	if err != nil {
+		return "", err
+	}
+	if globalCount >= tldrGlobalLimitPerHr {
+		return fmt.Sprintf("You've reached the maximum of %d TLDR uses per hour. Try again later.", tldrGlobalLimitPerHr), nil
+	}
+
+	return "", nil
+}
+
+func recordTLDRUsage(userID, username, channelID, guildID string, hoursRequested, messageCount int) error {
+	_, err := db.Exec(`
+		INSERT INTO tldr_usages (user_id, username, channel_id, guild_id, hours_requested, message_count)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		userID, username, channelID, guildID, hoursRequested, messageCount,
+	)
+	return err
 }
 
 func getMessageByID(messageID string) (*StoredMessage, []StoredContent, error) {

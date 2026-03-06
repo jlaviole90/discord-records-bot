@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
 
 func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.Author == nil || m.Author.Bot || m.GuildID == "" {
+	if m.Author == nil || m.Author.Bot || m.Author.System || m.GuildID == "" {
 		return
 	}
 
@@ -27,6 +29,11 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if m.MessageReference != nil && m.MessageReference.MessageID != "" {
 		handleRepostOriginal(s, m)
+		return
+	}
+
+	if hours, ok := parseTLDR(m.Content); ok {
+		handleTLDR(s, m, hours)
 		return
 	}
 
@@ -91,6 +98,74 @@ func onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
 			log.Printf("Error marking message %s as deleted: %v", id, err)
 		}
 	}
+}
+
+func parseTLDR(content string) (int, bool) {
+	lower := strings.ToLower(content)
+	idx := strings.Index(lower, "tldr")
+	if idx == -1 {
+		return 0, false
+	}
+
+	rest := strings.TrimSpace(lower[idx+4:])
+	if rest == "" {
+		return 1, true
+	}
+
+	fields := strings.Fields(rest)
+	hours, err := strconv.Atoi(fields[0])
+	if err != nil || hours < 1 {
+		return 1, true
+	}
+	if hours > 24 {
+		hours = 24
+	}
+	return hours, true
+}
+
+func handleTLDR(s *discordgo.Session, m *discordgo.MessageCreate, hours int) {
+	if geminiAPIKey == "" {
+		s.ChannelMessageSend(m.ChannelID, "The TLDR feature is not configured (missing Gemini API key).")
+		return
+	}
+
+	denial, err := checkTLDRRateLimit(m.Author.ID, m.ChannelID)
+	if err != nil {
+		log.Printf("Error checking TLDR rate limit: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong. Try again later.")
+		return
+	}
+	if denial != "" {
+		s.ChannelMessageSend(m.ChannelID, denial)
+		return
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	messages, err := getRecentMessages(m.ChannelID, since)
+	if err != nil || len(messages) == 0 {
+		s.ChannelMessageSend(m.ChannelID,
+			fmt.Sprintf("No messages found in the last %d hour(s).", hours))
+		return
+	}
+
+	s.ChannelTyping(m.ChannelID)
+
+	summary, err := summarizeMessages(geminiAPIKey, messages, hours)
+	if err != nil {
+		log.Printf("Error summarizing messages: %v", err)
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong generating the summary.")
+		return
+	}
+
+	if err := recordTLDRUsage(m.Author.ID, m.Author.Username, m.ChannelID, m.GuildID, hours, len(messages)); err != nil {
+		log.Printf("Error recording TLDR usage: %v", err)
+	}
+
+	if len(summary) > 2000 {
+		summary = summary[:1997] + "..."
+	}
+
+	s.ChannelMessageSend(m.ChannelID, summary)
 }
 
 func handleRepostOriginal(s *discordgo.Session, m *discordgo.MessageCreate) {

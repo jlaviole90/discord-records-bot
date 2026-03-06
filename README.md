@@ -15,6 +15,7 @@ All commands work by **mentioning the bot** (`@RecordsBot`) in a message.
 | **Repost latest message** | `@RecordsBot @user` | Reposts the mentioned user's most recent message in the current channel |
 | **Repost deleted message** | `@RecordsBot @user 🗑️` | Reposts the mentioned user's most recently deleted message in the current channel |
 | **Retrieve original (pre-edit)** | Reply to any message and tag `@RecordsBot` | Reposts the saved original version of the replied-to message, before any edits |
+| **TLDR summary** | `@RecordsBot tldr 2` | Summarizes the last 2 hours of conversation in the current channel using Gemini AI (1–24 hours, defaults to 1) |
 
 Every repost appears as if the original user sent it — the bot creates a temporary webhook with their username, display name, and avatar, then cleans it up immediately.
 
@@ -25,6 +26,7 @@ Every repost appears as if the original user sent it — the bot creates a tempo
 - **Message recording** — Every non-bot message is stored in PostgreSQL as it arrives (text content + attachment metadata). Messages in a channel named `quotes` are excluded.
 - **Edit tracking** — When a message is edited for the first time, the original content is snapshotted into a separate column. The current content is updated in place. Subsequent edits do not overwrite the snapshot, so the pre-edit original is always preserved.
 - **Delete tracking** — When a message is deleted, it is marked as deleted with a timestamp. The content remains in the database for retrieval.
+- **TLDR summaries** — When invoked with `tldr`, the bot queries recent messages from the database, builds a timestamped transcript, and sends it to Google Gemini for summarization. The transcript is capped at 16,000 characters to control API costs. Requires a Gemini API key; the feature is silently disabled without one.
 - **Disk monitoring** — A background goroutine checks RAID disk usage hourly and sends a warning to a `bot-alerts` channel (configurable) when usage exceeds a threshold.
 
 ---
@@ -37,6 +39,7 @@ Every repost appears as if the original user sent it — the bot creates a tempo
 - A Discord bot token with the following **privileged gateway intents** enabled in the [Discord Developer Portal](https://discord.com/developers/applications):
   - **Message Content Intent**
 - Bot permissions: `Manage Webhooks`, `Send Messages`, `Read Message History`, `View Channels`
+- *(Optional)* A [Google Gemini API key](https://aistudio.google.com/apikey) for the TLDR feature (free tier: 15 RPM / 1M tokens per day)
 
 ### 1. Clone and configure
 
@@ -45,10 +48,11 @@ git clone https://github.com/your-user/discord-records-bot.git
 cd discord-records-bot
 ```
 
-Create a `discord_token.txt` file in the project root containing your bot token:
+Create secret files in the project root:
 
 ```bash
 echo "your-bot-token-here" > discord_token.txt
+echo "your-gemini-api-key" > gemini_api_key.txt   # optional, enables TLDR
 ```
 
 ### 2. Review storage paths
@@ -96,6 +100,8 @@ All configuration is done through environment variables in `compose.yaml` (or a 
 | `RAID_MOUNT_PATH` | — | Filesystem path to monitor for disk usage. Leave empty to disable monitoring |
 | `DISK_WARN_THRESHOLD` | `90` | Disk usage percentage that triggers a warning |
 | `DISK_WARN_CHANNEL` | `bot-alerts` | Channel name where disk space warnings are sent |
+| `GEMINI_API_KEY` | — | Google Gemini API key (direct value) |
+| `GEMINI_API_KEY_FILE` | — | Path to a file containing the Gemini API key (Docker secrets) |
 
 ---
 
@@ -105,6 +111,7 @@ All configuration is done through environment variables in `compose.yaml` (or a 
 ├── main.go          # Entry point, session setup, signal handling
 ├── handlers.go      # Discord event handlers and repost logic
 ├── database.go      # PostgreSQL operations and schema migration
+├── gemini.go        # Gemini API client for TLDR summaries
 ├── monitor.go       # RAID disk space monitoring
 ├── schema.sql       # Database schema (embedded into the binary)
 ├── reference.go     # Webhook reference implementation

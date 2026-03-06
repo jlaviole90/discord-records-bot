@@ -1,6 +1,8 @@
 secrets:
   discord_token:
     file: ./discord_token.txt
+  gemini_api_key:
+    file: ./gemini_api_key.txt
 
 services:
   db:
@@ -30,11 +32,15 @@ services:
         condition: service_healthy
     environment:
       DISCORD_TOKEN_FILE: /run/secrets/discord_token
+      GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
       DATABASE_URL: postgres://postgres:postgres@db:5432/records?sslmode=disable
       RAID_MOUNT_PATH: /mnt/raid0
       DISK_WARN_THRESHOLD: "90"
       DISK_WARN_CHANNEL: bot-alerts
+      TLDR_CHANNEL_LIMIT: "1"
+      TLDR_GLOBAL_LIMIT: "5"
     secrets:
       - discord_token
+      - gemini_api_key
     volumes:
       - /mnt/raid0:/mnt/raid0:ro

@@ -34,3 +34,20 @@ CREATE INDEX IF NOT EXISTS idx_messages_deleted
 
 CREATE INDEX IF NOT EXISTS idx_message_contents_msg
     ON message_contents(message_id);
+
+CREATE TABLE IF NOT EXISTS tldr_usages (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    guild_id TEXT NOT NULL,
+    hours_requested INT NOT NULL,
+    message_count INT NOT NULL DEFAULT 0,
+    used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tldr_usages_user_channel
+    ON tldr_usages(user_id, channel_id, used_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tldr_usages_user_global
+    ON tldr_usages(user_id, used_at DESC);

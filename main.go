@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -14,8 +15,11 @@ import (
 )
 
 var (
-	db    *sql.DB
-	botID string
+	db                    *sql.DB
+	botID                 string
+	geminiAPIKey          string
+	tldrChannelLimitPerHr int
+	tldrGlobalLimitPerHr  int
 )
 
 func main() {
@@ -36,6 +40,14 @@ func main() {
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
+
+	geminiAPIKey = loadOptionalSecret("GEMINI_API_KEY", "GEMINI_API_KEY_FILE")
+	if geminiAPIKey == "" {
+		log.Println("Warning: No Gemini API key configured. TLDR feature will be disabled.")
+	}
+
+	tldrChannelLimitPerHr = envInt("TLDR_CHANNEL_LIMIT", 1)
+	tldrGlobalLimitPerHr = envInt("TLDR_GLOBAL_LIMIT", 5)
 
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -85,6 +97,27 @@ func loadToken() string {
 		log.Fatal("No Discord token provided. Set DISCORD_TOKEN or DISCORD_TOKEN_FILE.")
 	}
 	return token
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+		log.Printf("Warning: invalid value for %s, using default %d", key, fallback)
+	}
+	return fallback
+}
+
+func loadOptionalSecret(envKey, fileEnvKey string) string {
+	if path := os.Getenv(fileEnvKey); path != "" {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+		log.Printf("Warning: could not read %s from %s: %v", fileEnvKey, path, err)
+	}
+	return os.Getenv(envKey)
 }
 
 func onReady(s *discordgo.Session, r *discordgo.Ready) {
