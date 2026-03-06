@@ -57,7 +57,8 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if strings.Contains(m.Content, "🗑️") || strings.Contains(m.Content, "🗑") ||
 		strings.Contains(lower, "deleted") || strings.Contains(lower, "delete") {
-		handleRepostDeleted(s, m, target)
+		count := parseDeleteCount(m.Content)
+		handleRepostDeleted(s, m, target, count)
 	} else {
 		handleRepostLatest(s, m, target)
 	}
@@ -205,32 +206,65 @@ func handleRepostLatest(s *discordgo.Session, m *discordgo.MessageCreate, target
 	repostMessage(s, m.ChannelID, msg, contents)
 }
 
-func handleRepostDeleted(s *discordgo.Session, m *discordgo.MessageCreate, target *discordgo.User) {
-	msg, contents, err := getLatestDeletedMessage(m.ChannelID, target.ID)
-	if err != nil {
+func parseDeleteCount(content string) int {
+	for _, field := range strings.Fields(content) {
+		if n, err := strconv.Atoi(field); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+func handleRepostDeleted(s *discordgo.Session, m *discordgo.MessageCreate, target *discordgo.User, count int) {
+	msgs, err := getDeletedMessages(m.ChannelID, target.ID, count)
+	if err != nil || len(msgs) == 0 {
 		s.ChannelMessageSend(m.ChannelID,
 			fmt.Sprintf("No deleted messages found for **%s** in this channel.", target.Username))
 		return
 	}
-	repostMessage(s, m.ChannelID, msg, contents)
-}
 
-func repostMessage(s *discordgo.Session, channelID string, msg *StoredMessage, contents []StoredContent) {
-	wh, err := s.WebhookCreate(channelID, msg.Username, msg.AvatarURL)
+	// Reverse to chronological order (query returns newest first)
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+
+	first := msgs[0]
+	wh, err := s.WebhookCreate(m.ChannelID, first.Username, first.AvatarURL)
 	if err != nil {
 		log.Printf("Error creating webhook: %v", err)
-		s.ChannelMessageSend(channelID, "Something went wrong while creating the webhook.")
+		s.ChannelMessageSend(m.ChannelID, "Something went wrong while creating the webhook.")
 		return
 	}
 
-	displayName := msg.DisplayName
-	if displayName == "" {
-		displayName = msg.Username
+	for _, msg := range msgs {
+		contents, err := getMessageContents(msg.ID)
+		if err != nil {
+			log.Printf("Error fetching contents for message %s: %v", msg.ID, err)
+			continue
+		}
+
+		params := buildWebhookParams(&msg, contents)
+		if params == nil {
+			continue
+		}
+
+		if _, err := s.WebhookExecute(wh.ID, wh.Token, false, params); err != nil {
+			log.Printf("Error executing webhook for message %s: %v", msg.ID, err)
+		}
+	}
+
+	cleanupWebhook(s, m.ChannelID, wh)
+}
+
+func buildWebhookParams(msg *StoredMessage, contents []StoredContent) *discordgo.WebhookParams {
+	dn := msg.DisplayName
+	if dn == "" {
+		dn = msg.Username
 	}
 
 	params := &discordgo.WebhookParams{
 		Content:   msg.Content,
-		Username:  fmt.Sprintf("%s | %s", msg.Username, displayName),
+		Username:  fmt.Sprintf("%s | %s", msg.Username, dn),
 		AvatarURL: msg.AvatarURL,
 	}
 
@@ -246,6 +280,21 @@ func repostMessage(s *discordgo.Session, channelID string, msg *StoredMessage, c
 	}
 
 	if params.Content == "" && len(params.Embeds) == 0 {
+		return nil
+	}
+	return params
+}
+
+func repostMessage(s *discordgo.Session, channelID string, msg *StoredMessage, contents []StoredContent) {
+	wh, err := s.WebhookCreate(channelID, msg.Username, msg.AvatarURL)
+	if err != nil {
+		log.Printf("Error creating webhook: %v", err)
+		s.ChannelMessageSend(channelID, "Something went wrong while creating the webhook.")
+		return
+	}
+
+	params := buildWebhookParams(msg, contents)
+	if params == nil {
 		s.ChannelMessageSend(channelID, "That message had no retrievable content.")
 		cleanupWebhook(s, channelID, wh)
 		return
@@ -272,7 +321,7 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
 	help := "📋 **Records Bot — Commands**\n\n" +
 		"**Message Reposting**\n" +
 		"💬 `@bot @user` — Repost their latest message in this channel\n" +
-		"🗑️ `@bot @user deleted` or `@bot @user 🗑️` — Repost their latest deleted message\n" +
+		"🗑️ `@bot @user deleted [count]` or `@bot @user 🗑️ [count]` — Repost their last N deleted messages (default: 1)\n" +
 		"✏️ `Reply to a message + @bot original` — Repost the original pre-edit version\n\n" +
 		"**Summaries**\n" +
 		"📜 `@bot tldr [hours]` — AI summary of the last N hours (default: 1, max: 24)\n\n" +

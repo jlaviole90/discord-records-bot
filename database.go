@@ -137,27 +137,34 @@ func getLatestMessage(channelID, userID, excludeMessageID string) (*StoredMessag
 	return msg, contents, err
 }
 
-func getLatestDeletedMessage(channelID, userID string) (*StoredMessage, []StoredContent, error) {
-	msg := &StoredMessage{}
-	err := db.QueryRow(`
+func getDeletedMessages(channelID, userID string, limit int) ([]StoredMessage, error) {
+	rows, err := db.Query(`
 		SELECT id, guild_id, channel_id, user_id, username, display_name,
 		       avatar_url, content, original_content, sent_at, edited_at, is_deleted, deleted_at
 		FROM messages
 		WHERE channel_id = $1 AND user_id = $2 AND is_deleted = TRUE
 		ORDER BY deleted_at DESC
-		LIMIT 1`,
-		channelID, userID,
-	).Scan(
-		&msg.ID, &msg.GuildID, &msg.ChannelID, &msg.UserID,
-		&msg.Username, &msg.DisplayName, &msg.AvatarURL,
-		&msg.Content, &msg.OriginalContent, &msg.SentAt, &msg.EditedAt, &msg.IsDeleted, &msg.DeletedAt,
+		LIMIT $3`,
+		channelID, userID, limit,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	defer rows.Close()
 
-	contents, err := getMessageContents(msg.ID)
-	return msg, contents, err
+	var msgs []StoredMessage
+	for rows.Next() {
+		var m StoredMessage
+		if err := rows.Scan(
+			&m.ID, &m.GuildID, &m.ChannelID, &m.UserID,
+			&m.Username, &m.DisplayName, &m.AvatarURL,
+			&m.Content, &m.OriginalContent, &m.SentAt, &m.EditedAt, &m.IsDeleted, &m.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
 }
 
 func getRecentMessages(channelID string, since time.Time) ([]ChatLine, error) {
