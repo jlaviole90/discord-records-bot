@@ -383,7 +383,7 @@ func getTopChannels(guildID string, since *time.Time) ([]ChannelActivity, error)
 		args = append(args, *since)
 	}
 
-	query += " GROUP BY channel_id ORDER BY total DESC LIMIT 10"
+	query += " GROUP BY channel_id ORDER BY total DESC"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -412,7 +412,7 @@ func getUserChannelActivity(guildID, userID string, since *time.Time) ([]Channel
 		args = append(args, *since)
 	}
 
-	query += " GROUP BY channel_id ORDER BY total DESC LIMIT 10"
+	query += " GROUP BY channel_id ORDER BY total DESC"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {

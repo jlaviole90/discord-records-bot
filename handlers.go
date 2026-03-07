@@ -469,6 +469,61 @@ func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, since *
 	s.ChannelMessageSend(m.ChannelID, msg)
 }
 
+// isPublicChannel checks whether the @everyone role can view a channel,
+// so results are safe to display publicly regardless of who invoked the command.
+func isPublicChannel(s *discordgo.Session, guildID, channelID string) bool {
+	ch, err := s.State.Channel(channelID)
+	if err != nil {
+		ch, err = s.Channel(channelID)
+		if err != nil {
+			return false
+		}
+	}
+
+	guild, err := s.State.Guild(guildID)
+	if err != nil {
+		guild, err = s.Guild(guildID)
+		if err != nil {
+			return false
+		}
+	}
+
+	var basePerms int64
+	for _, role := range guild.Roles {
+		if role.ID == guildID {
+			basePerms = role.Permissions
+			break
+		}
+	}
+
+	if basePerms&discordgo.PermissionAdministrator != 0 {
+		return true
+	}
+
+	for _, ow := range ch.PermissionOverwrites {
+		if ow.ID == guildID {
+			basePerms &= ^ow.Deny
+			basePerms |= ow.Allow
+			break
+		}
+	}
+
+	return basePerms&discordgo.PermissionViewChannel != 0
+}
+
+func filterVisibleChannels(s *discordgo.Session, channels []ChannelActivity, guildID, currentChannelID string, limit int) []ChannelActivity {
+	var result []ChannelActivity
+	for _, ch := range channels {
+		if len(result) >= limit {
+			break
+		}
+		if ch.ChannelID == currentChannelID || isPublicChannel(s, guildID, ch.ChannelID) {
+			result = append(result, ch)
+		}
+	}
+	return result
+}
+
 func handleTopChannels(s *discordgo.Session, m *discordgo.MessageCreate, since *time.Time, label string) {
 	total, _ := getMessageCount(m.GuildID, "", since)
 	channels, err := getTopChannels(m.GuildID, since)
@@ -477,6 +532,8 @@ func handleTopChannels(s *discordgo.Session, m *discordgo.MessageCreate, since *
 		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching channel stats.")
 		return
 	}
+
+	channels = filterVisibleChannels(s, channels, m.GuildID, m.ChannelID, 10)
 
 	msg := fmt.Sprintf("📊 **Top Channels — %s** (%d messages)\n\n", label, total)
 
@@ -526,6 +583,8 @@ func handleUserLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, tar
 		s.ChannelMessageSend(m.ChannelID, "Something went wrong fetching channel activity.")
 		return
 	}
+
+	channels = filterVisibleChannels(s, channels, m.GuildID, m.ChannelID, 10)
 
 	if len(channels) == 0 {
 		msg += noMessagesYet
