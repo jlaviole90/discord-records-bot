@@ -27,8 +27,11 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+# Export all variables so child scripts (deploy.sh) inherit them.
+set -a
 # shellcheck source=/dev/null
 source "$ENV_FILE"
+set +a
 
 # --- Validate required variables ---
 : "${TARGET_USER_ID:?TARGET_USER_ID is required in $ENV_FILE}"
@@ -46,6 +49,7 @@ OLLAMA_CONTAINER="${OLLAMA_CONTAINER:-discord-quotes-bot-ollama-1}"
 BASE_MODEL="${BASE_MODEL:-unsloth/Llama-3.2-3B-Instruct-bnb-4bit}"
 EPOCHS="${EPOCHS:-3}"
 QUANT_METHOD="${QUANT_METHOD:-q4_k_m}"
+HTTP_PORT="${HTTP_PORT:-8888}"
 
 MODEL_NAME="impersonate"
 PIPELINE_DIR="/mnt/raid0/discord-records-bot/pipeline"
@@ -55,8 +59,43 @@ GGUF_LOCAL="${PIPELINE_DIR}/model.gguf"
 
 BOT_CONTAINER="discord-records-bot"
 
+# Resolve the Windows machine's IP from SSH config for HTTP download.
+WINDOWS_IP=$(ssh -G "$WINDOWS_HOST" 2>/dev/null | awk '/^hostname / {print $2}')
+if [ -z "$WINDOWS_IP" ]; then
+    echo "Error: could not resolve IP for SSH host '$WINDOWS_HOST'."
+    echo "Check your ~/.ssh/config."
+    exit 1
+fi
+
+# ------------------------------------------------------------------
+# Cleanup: kill the HTTP server on Windows on any exit.
+# ------------------------------------------------------------------
+HTTP_SERVER_STARTED=false
+
+cleanup() {
+    if [ "$HTTP_SERVER_STARTED" = true ]; then
+        echo "Cleaning up: stopping HTTP server on Windows..."
+        ssh -o ConnectTimeout=10 "$WINDOWS_HOST" \
+            "powershell -Command \"Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force\"" \
+            2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# ------------------------------------------------------------------
+# Connectivity check: make sure Windows is reachable before we start.
+# ------------------------------------------------------------------
+echo "Checking connectivity to Windows machine ($WINDOWS_HOST)..."
+if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$WINDOWS_HOST" "echo ok" >/dev/null 2>&1; then
+    echo "Error: cannot reach $WINDOWS_HOST. Is the machine awake?"
+    echo "Pipeline aborted."
+    exit 1
+fi
+echo "Windows machine is reachable."
+
 mkdir -p "$PIPELINE_DIR"
 
+echo ""
 echo "=== Pipeline started at $(date -u) ==="
 echo "Target: ${TARGET_DISPLAY_NAME} (${TARGET_USER_ID})"
 
@@ -89,7 +128,7 @@ fi
 echo "Exported ${CONV_COUNT} conversations."
 
 # ------------------------------------------------------------------
-# Step 2: Transfer data to Windows
+# Step 2: Transfer training data to Windows (small file, SCP is fine)
 # ------------------------------------------------------------------
 echo ""
 echo "=== Step 2/4: Transferring data to training machine ==="
@@ -126,17 +165,85 @@ ssh "$WINDOWS_HOST" "\
 
 echo "Training complete."
 
-# Retrieve GGUF from Windows
-echo "Retrieving GGUF from Windows..."
+# ------------------------------------------------------------------
+# Step 3b: Retrieve GGUF from Windows via HTTP
+#
+# Windows OpenSSH SCP is unreliable for large files (truncates ~2GB
+# GGUF models). Instead we start a temporary Python HTTP server on
+# Windows and download with curl.
+# ------------------------------------------------------------------
+echo ""
+echo "Retrieving GGUF from Windows via HTTP..."
 
-GGUF_REMOTE=$(ssh "$WINDOWS_HOST" "dir /b ${WINDOWS_TRAIN_DIR}\\output\\gguf\\*.gguf" 2>/dev/null | head -1 | tr -d '\r')
-if [ -z "$GGUF_REMOTE" ]; then
-    echo "Error: no GGUF file found on Windows at ${WINDOWS_TRAIN_DIR}\\output\\gguf\\"
+# Unsloth appends _gguf to the output directory name, so the actual
+# path is gguf_gguf/ when train.py passes "gguf" as the dir name.
+GGUF_SEARCH_DIR="${WINDOWS_TRAIN_DIR}\\output\\gguf_gguf"
+
+GGUF_FILENAME=$(ssh "$WINDOWS_HOST" \
+    "dir /b \"${GGUF_SEARCH_DIR}\\*.gguf\"" 2>/dev/null \
+    | tr -d '\r' \
+    | grep -i "Q4_K_M" \
+    | head -1)
+
+if [ -z "$GGUF_FILENAME" ]; then
+    echo "Error: no Q4_K_M GGUF found in ${GGUF_SEARCH_DIR}\\ on Windows."
+    echo "Falling back to recursive search..."
+    GGUF_FILENAME=$(ssh "$WINDOWS_HOST" \
+        "dir /s /b \"${WINDOWS_TRAIN_DIR}\\output\\*.gguf\"" 2>/dev/null \
+        | tr -d '\r' \
+        | grep -i "Q4_K_M" \
+        | head -1)
+    if [ -z "$GGUF_FILENAME" ]; then
+        echo "Error: no GGUF file found anywhere under ${WINDOWS_TRAIN_DIR}\\output\\"
+        exit 1
+    fi
+    # dir /s /b returns full paths; extract directory and filename.
+    GGUF_FILENAME_UNIX=$(echo "$GGUF_FILENAME" | tr '\\' '/')
+    GGUF_SEARCH_DIR_UNIX=$(dirname "$GGUF_FILENAME_UNIX")
+    GGUF_FILENAME=$(basename "$GGUF_FILENAME_UNIX")
+    # Convert back to Windows backslash path for the HTTP server.
+    GGUF_SEARCH_DIR=$(echo "$GGUF_SEARCH_DIR_UNIX" | tr '/' '\\')
+fi
+
+echo "Found GGUF: ${GGUF_FILENAME}"
+
+# Kill any leftover HTTP server from a previous failed run.
+ssh "$WINDOWS_HOST" \
+    "powershell -Command \"Get-NetTCPConnection -LocalPort ${HTTP_PORT} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue }\"" \
+    2>/dev/null || true
+
+# Start the HTTP server on Windows. PowerShell Start-Process detaches
+# the process so the SSH command returns immediately.
+# Use forward slashes — Python's http.server handles them on Windows.
+SERVE_DIR=$(echo "$GGUF_SEARCH_DIR" | tr '\\' '/')
+ssh "$WINDOWS_HOST" \
+    "powershell -Command \"Start-Process -FilePath '${WINDOWS_TRAIN_DIR}/venv/Scripts/python.exe' -ArgumentList '-m','http.server','${HTTP_PORT}','--directory','${SERVE_DIR}' -WindowStyle Hidden\""
+HTTP_SERVER_STARTED=true
+
+echo "HTTP server started on ${WINDOWS_IP}:${HTTP_PORT}, waiting for it to bind..."
+sleep 3
+
+# Download the GGUF.
+echo "Downloading ${GGUF_FILENAME} (~2 GB)..."
+if ! curl -f --progress-bar -o "$GGUF_LOCAL" \
+    "http://${WINDOWS_IP}:${HTTP_PORT}/${GGUF_FILENAME}"; then
+    echo "Error: curl download failed."
     exit 1
 fi
 
-scp "${WINDOWS_HOST}:${WINDOWS_TRAIN_DIR}/output/gguf/${GGUF_REMOTE}" "$GGUF_LOCAL"
-echo "Retrieved GGUF: ${GGUF_LOCAL}"
+# Verify the download isn't truncated. A 3B Q4_K_M model should be
+# well over 500 MB.
+GGUF_SIZE=$(stat -c%s "$GGUF_LOCAL" 2>/dev/null || stat -f%z "$GGUF_LOCAL" 2>/dev/null)
+MIN_SIZE=$((500 * 1024 * 1024))
+if [ "$GGUF_SIZE" -lt "$MIN_SIZE" ]; then
+    echo "Error: downloaded GGUF is only $(( GGUF_SIZE / 1024 / 1024 )) MB — likely truncated."
+    echo "Expected at least 500 MB for a 3B Q4_K_M model."
+    rm -f "$GGUF_LOCAL"
+    exit 1
+fi
+echo "Downloaded GGUF: $(( GGUF_SIZE / 1024 / 1024 )) MB — OK."
+
+# HTTP server is cleaned up by the EXIT trap.
 
 # ------------------------------------------------------------------
 # Step 4: Deploy to server0
@@ -145,10 +252,7 @@ echo ""
 echo "=== Step 4/4: Deploying to server0 ==="
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVER0="$SERVER0" \
-SERVER0_MODELS_DIR="$SERVER0_MODELS_DIR" \
-OLLAMA_CONTAINER="$OLLAMA_CONTAINER" \
-    "$SCRIPT_DIR/deploy.sh" "$GGUF_LOCAL" "$TARGET_DISPLAY_NAME"
+"$SCRIPT_DIR/deploy.sh" "$GGUF_LOCAL" "$TARGET_DISPLAY_NAME"
 
 # Save cursor for next incremental export
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$CURSOR_FILE"

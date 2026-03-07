@@ -62,6 +62,6 @@ ssh "$SERVER0" "docker exec ${OLLAMA_CONTAINER} ollama list" | grep "$MODEL_NAME
 }
 
 echo "==> Restarting quotes bot to pick up new model..."
-ssh "$SERVER0" "cd ~/repos/misc/discord-quotes-bot && docker compose restart discord-quotes-bot"
+ssh "$SERVER0" "cd ~/discord-quotes-bot && docker compose restart discord-quotes-bot"
 
 echo "==> Done! Model '${MODEL_NAME}' is deployed and the bot has been restarted."
