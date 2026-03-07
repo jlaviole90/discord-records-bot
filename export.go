@@ -7,8 +7,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+)
+
+var (
+	customEmojiRe  = regexp.MustCompile(`<a?:(\w+):\d+>`)
+	userMentionRe  = regexp.MustCompile(`<@!?(\d+)>`)
+	channelMentionRe = regexp.MustCompile(`<#\d+>`)
+	roleMentionRe  = regexp.MustCompile(`<@&\d+>`)
+	urlRe          = regexp.MustCompile(`https?://\S+`)
 )
 
 type ShareGPTMessage struct {
@@ -74,11 +83,20 @@ func runExport() {
 	displayName := resolveDisplayName(conn, *userID)
 	systemPrompt := fmt.Sprintf(defaultSystemPromptTpl, displayName, displayName, displayName)
 
+	userNames, err := buildUserNameMap(conn, *guildID)
+	if err != nil {
+		log.Fatalf("Failed to build user name map: %v", err)
+	}
+
 	messages, err := queryExportMessages(conn, *guildID, since)
 	if err != nil {
 		log.Fatalf("Failed to query messages: %v", err)
 	}
 	log.Printf("Loaded %d messages from database", len(messages))
+
+	for i := range messages {
+		messages[i].Content = sanitizeContent(messages[i].Content, userNames)
+	}
 
 	conversations := buildConversations(messages, *userID, systemPrompt, *windowMin, *minTurns)
 	log.Printf("Built %d conversations containing target user", len(conversations))
@@ -88,6 +106,48 @@ func runExport() {
 	}
 
 	log.Printf("Wrote %d conversations to %s", len(conversations), *output)
+}
+
+func buildUserNameMap(conn *sql.DB, guildID string) (map[string]string, error) {
+	rows, err := conn.Query(
+		`SELECT DISTINCT ON (user_id) user_id, COALESCE(NULLIF(display_name, ''), username)
+		 FROM messages WHERE guild_id = $1 ORDER BY user_id, sent_at DESC`,
+		guildID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	m := make(map[string]string)
+	for rows.Next() {
+		var uid, name string
+		if err := rows.Scan(&uid, &name); err != nil {
+			return nil, err
+		}
+		m[uid] = name
+	}
+	return m, rows.Err()
+}
+
+func sanitizeContent(content string, userNames map[string]string) string {
+	content = customEmojiRe.ReplaceAllString(content, ":$1:")
+
+	content = userMentionRe.ReplaceAllStringFunc(content, func(match string) string {
+		sub := userMentionRe.FindStringSubmatch(match)
+		if len(sub) > 1 {
+			if name, ok := userNames[sub[1]]; ok {
+				return "@" + name
+			}
+		}
+		return "@someone"
+	})
+
+	content = channelMentionRe.ReplaceAllString(content, "#channel")
+	content = roleMentionRe.ReplaceAllString(content, "@role")
+	content = urlRe.ReplaceAllString(content, "")
+
+	return strings.TrimSpace(content)
 }
 
 func resolveDisplayName(conn *sql.DB, userID string) string {
