@@ -36,10 +36,10 @@ def parse_args():
     p.add_argument("--base-model", default="unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
                     help="Base model to fine-tune")
     p.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
-    p.add_argument("--batch-size", type=int, default=4, help="Per-device train batch size")
+    p.add_argument("--batch-size", type=int, default=2, help="Per-device train batch size")
     p.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
     p.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
-    p.add_argument("--max-seq-len", type=int, default=2048, help="Maximum sequence length")
+    p.add_argument("--max-seq-len", type=int, default=1024, help="Maximum sequence length")
     p.add_argument("--lora-rank", type=int, default=64, help="LoRA rank")
     p.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha")
     p.add_argument("--quant-method", default="q4_k_m", help="GGUF quantization method")
@@ -102,7 +102,7 @@ def main():
             model,
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
-            lora_dropout=0.05,
+            lora_dropout=0,
             target_modules=[
                 "q_proj", "k_proj", "v_proj", "o_proj",
                 "gate_proj", "up_proj", "down_proj",
