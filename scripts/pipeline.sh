@@ -115,6 +115,7 @@ fi
 
 ssh "$WINDOWS_HOST" "\
     call ${TRAIN_VENV_ACTIVATE} && \
+    set PYTHONIOENCODING=utf-8 && \
     python ${TRAIN_SCRIPT_PATH} \
         --data ${WINDOWS_TRAIN_DIR}/training_data.jsonl \
         --output ${WINDOWS_TRAIN_DIR}/output \
