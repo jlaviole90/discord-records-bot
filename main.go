@@ -23,6 +23,11 @@ var (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "export" {
+		runExport()
+		return
+	}
+
 	token := loadToken()
 
 	dbURL := os.Getenv("DATABASE_URL")

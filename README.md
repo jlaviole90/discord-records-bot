@@ -85,7 +85,8 @@ Every repost appears as if the original user sent it — the bot creates a tempo
 - **Delete tracking** — When a message is deleted, it is marked as deleted with a timestamp. The content remains in the database for retrieval.
 - **TLDR summaries** — When invoked with `tldr`, the bot queries recent messages from the database, builds a timestamped transcript, and sends it to Google Gemini for summarization. The transcript is capped at 16,000 characters to control API costs. Requires a Gemini API key; the feature is silently disabled without one.
 - **Leaderboards** — Aggregated stats for the server, filterable by time window (hours, days, months, or all-time). Queries count messages, deletes, and edits per user, with average reaction times.
-- **Backfill** — An admin-only command that retroactively fetches and archives all message history from every text channel in the server. Paginates through the Discord API (100 messages at a time), respects rate limits, and deduplicates against existing records. Progress is reported per channel.
+- **Backfill** — Retroactively fetches and archives all message history from every text channel in the server. Paginates through the Discord API (100 messages at a time), respects rate limits, and deduplicates against existing records. Progress is reported per channel.
+- **Training data export** — A built-in `export` subcommand extracts conversation data from PostgreSQL into ShareGPT-formatted JSONL for fine-tuning LLMs on a user's message history. Used by the training pipeline scripts.
 - **Disk monitoring** — A background goroutine checks RAID disk usage hourly and sends a warning to a `bot-alerts` channel (configurable) when usage exceeds a threshold.
 
 ---
@@ -170,16 +171,22 @@ All configuration is done through environment variables in `compose.yaml` (or a 
 ## Project Structure
 
 ```
-├── main.go          # Entry point, session setup, signal handling
-├── handlers.go      # Discord event handlers and repost logic
-├── database.go      # PostgreSQL operations and schema migration
-├── gemini.go        # Gemini API client for TLDR summaries
-├── monitor.go       # RAID disk space monitoring
-├── schema.sql       # Database schema (embedded into the binary)
-├── reference.go     # Webhook reference implementation
-├── Dockerfile       # Multi-stage Go build → Alpine runtime
-├── compose.yaml     # Docker Compose for bot + PostgreSQL
-└── .env.example     # Environment variable template
+├── main.go              # Entry point, session setup, signal handling
+├── handlers.go          # Discord event handlers and repost logic
+├── database.go          # PostgreSQL operations and schema migration
+├── gemini.go            # Gemini API client for TLDR summaries
+├── export.go            # Training data export (PostgreSQL → JSONL)
+├── backfill.go          # Retroactive message archival
+├── monitor.go           # RAID disk space monitoring
+├── schema.sql           # Database schema (embedded into the binary)
+├── reference.go         # Webhook reference implementation
+├── Dockerfile           # Multi-stage Go build → Alpine runtime
+├── compose.yaml         # Docker Compose for bot + PostgreSQL
+├── .env.example         # Environment variable template
+└── scripts/
+    ├── train.py         # Unsloth QLoRA training script
+    ├── deploy.sh        # Deploy GGUF model to Ollama on server0
+    └── pipeline.sh      # Full orchestration: export → train → deploy
 ```
 
 ---

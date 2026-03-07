@@ -45,3 +45,4 @@ services:
       - gemini_api_key
     volumes:
       - /mnt/raid0:/mnt/raid0:ro
+      - /mnt/raid0/discord-records-bot/pipeline:/data/pipeline
