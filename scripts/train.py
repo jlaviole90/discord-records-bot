@@ -84,8 +84,7 @@ def main():
 
     # Lazy import so --help works without GPU
     from unsloth import FastLanguageModel
-    from trl import SFTTrainer
-    from transformers import TrainingArguments
+    from trl import SFTTrainer, SFTConfig
 
     model_name = args.adapter if args.adapter else args.base_model
     print(f"Loading model: {model_name}")
@@ -125,10 +124,10 @@ def main():
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=args.max_seq_len,
-        packing=True,
-        args=TrainingArguments(
+        args=SFTConfig(
+            dataset_text_field="text",
+            max_seq_length=args.max_seq_len,
+            packing=True,
             per_device_train_batch_size=args.batch_size,
             gradient_accumulation_steps=args.grad_accum,
             warmup_steps=10,
