@@ -76,6 +76,7 @@ func main() {
 	dg.AddHandler(onMessageUpdate)
 	dg.AddHandler(onMessageDelete)
 	dg.AddHandler(onMessageDeleteBulk)
+	dg.AddHandler(onMessageReactionAdd)
 
 	if err = dg.Open(); err != nil {
 		log.Fatalf("Failed to open Discord connection: %v", err)

@@ -396,6 +396,8 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
 		"📊 `@bot channels leaderboard [time]` — Top channels by message count\n" +
 		"  Time options: `all` (default), `3 hours`, `7 days`, `2 months`\n" +
 		"  Shortcuts: `h`, `d`, `m` — e.g. `@bot leaderboard 24 h`\n\n" +
+		"**Quotes**\n" +
+		"📸 React with 📸 to any message to save it to the #quotes channel\n\n" +
 		"**Meta**\n" +
 		"❓ `@bot help` — Show this message"
 	s.ChannelMessageSend(m.ChannelID, help)
