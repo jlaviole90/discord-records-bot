@@ -37,7 +37,7 @@ services:
       RAID_MOUNT_PATH: /mnt/raid0
       DISK_WARN_THRESHOLD: "90"
       DISK_WARN_CHANNEL: bot-alerts
-      GEMINI_MODEL: gemini-2.0-flash-lite
+      GEMINI_MODEL: gemini-2.5-flash
       TLDR_CHANNEL_LIMIT: "1"
       TLDR_GLOBAL_LIMIT: "5"
     secrets:
