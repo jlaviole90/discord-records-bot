@@ -51,7 +51,7 @@ PARAMETER top_p 0.9
 PARAMETER top_k 40
 PARAMETER repeat_penalty 1.5
 PARAMETER repeat_last_n 256
-PARAMETER num_predict 60
+PARAMETER num_predict 80
 MODELFILE_EOF"
 
 echo "==> Creating Ollama model '${MODEL_NAME}'..."
