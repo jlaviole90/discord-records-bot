@@ -154,6 +154,23 @@ func sanitizeContent(content string, userNames map[string]string) string {
 	return strings.TrimSpace(content)
 }
 
+func hasExcessiveRepetition(content string) bool {
+	words := strings.Fields(strings.ToLower(content))
+	if len(words) < 4 {
+		return false
+	}
+	freq := make(map[string]int)
+	for _, w := range words {
+		freq[w]++
+	}
+	for _, count := range freq {
+		if count > 3 && float64(count)/float64(len(words)) > 0.3 {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveDisplayName(conn *sql.DB, userID string) string {
 	var dn, un string
 	err := conn.QueryRow(
@@ -254,7 +271,7 @@ func buildTurns(window []exportMsg, targetUserID, systemPrompt string) []ShareGP
 		}
 
 		content := strings.TrimSpace(m.Content)
-		if len(content) < 3 {
+		if len(content) < 3 || hasExcessiveRepetition(content) {
 			continue
 		}
 

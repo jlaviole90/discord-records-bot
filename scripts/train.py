@@ -35,13 +35,13 @@ def parse_args():
     p.add_argument("--adapter", default=None, help="Path to previous LoRA adapter for incremental training")
     p.add_argument("--base-model", default="unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
                     help="Base model to fine-tune")
-    p.add_argument("--epochs", type=int, default=2, help="Number of training epochs")
+    p.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
     p.add_argument("--batch-size", type=int, default=2, help="Per-device train batch size")
     p.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
-    p.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
+    p.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
     p.add_argument("--max-seq-len", type=int, default=1024, help="Maximum sequence length")
-    p.add_argument("--lora-rank", type=int, default=64, help="LoRA rank")
-    p.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha")
+    p.add_argument("--lora-rank", type=int, default=32, help="LoRA rank")
+    p.add_argument("--lora-alpha", type=int, default=16, help="LoRA alpha")
     p.add_argument("--quant-method", default="q4_k_m", help="GGUF quantization method")
     p.add_argument("--skip-gguf", action="store_true", help="Skip GGUF export (adapter only)")
     return p.parse_args()
@@ -130,11 +130,12 @@ def main():
             packing=True,
             per_device_train_batch_size=args.batch_size,
             gradient_accumulation_steps=args.grad_accum,
-            warmup_steps=10,
+            warmup_ratio=0.1,
             num_train_epochs=args.epochs,
             learning_rate=args.lr,
+            weight_decay=0.01,
             fp16=True,
-            logging_steps=10,
+            logging_steps=5,
             output_dir=checkpoint_dir,
             save_strategy="epoch",
             optim="adamw_8bit",
