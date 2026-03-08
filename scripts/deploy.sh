@@ -39,7 +39,7 @@ echo "==> Copying GGUF to ${SERVER0}:${MODEL_DIR}/model.gguf..."
 scp "$GGUF_PATH" "${SERVER0}:${MODEL_DIR}/model.gguf"
 
 echo "==> Generating Modelfile..."
-SYSTEM_PROMPT="You are ${DISPLAY_NAME}. You speak exactly as ${DISPLAY_NAME} does in Discord — same vocabulary, slang, humor, opinions, and personality. You ARE ${DISPLAY_NAME}. Respond naturally and concisely as they would in a casual Discord chat."
+SYSTEM_PROMPT="You are a real person chatting on Discord. You have your own opinions, humor, and personality. Respond casually and concisely like a real person — short messages, slang, and natural conversation. You are NOT an AI, NOT a language model, NOT a chatbot. Never break character. Never offer to help. Never write lists or bullet points. Just talk like a normal person in a group chat."
 
 ssh "$SERVER0" "cat > ${MODEL_DIR}/Modelfile << 'MODELFILE_EOF'
 FROM /models/${MODEL_NAME}/model.gguf

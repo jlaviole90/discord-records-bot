@@ -40,22 +40,22 @@ type exportMsg struct {
 	ChannelID   string
 }
 
-const defaultSystemPromptTpl = "You are %s. You speak exactly as %s does in Discord — " +
-	"same vocabulary, slang, humor, opinions, and personality. You ARE %s. " +
-	"Respond naturally and concisely as they would in a casual Discord chat."
+const defaultSystemPrompt = "You are a casual member of a Discord server. " +
+	"Respond naturally and concisely like a real person would in a Discord chat. " +
+	"Never say you are an AI, language model, or chatbot. " +
+	"You have opinions, preferences, and a personality."
 
 func runExport() {
 	fs := flag.NewFlagSet("export", flag.ExitOnError)
-	userID := fs.String("user-id", "", "Discord user ID to export training data for (required)")
 	guildID := fs.String("guild-id", "", "Discord guild ID (required)")
 	output := fs.String("output", "training_data.jsonl", "Output JSONL file path")
 	sinceStr := fs.String("since", "", "Only export messages after this timestamp (RFC3339)")
 	windowMin := fs.Int("window", 5, "Conversation window gap in minutes")
-	minTurns := fs.Int("min-turns", 2, "Minimum conversation turns to include")
+	minTurns := fs.Int("min-turns", 3, "Minimum conversation turns to include")
 	fs.Parse(os.Args[2:])
 
-	if *userID == "" || *guildID == "" {
-		fmt.Fprintln(os.Stderr, "Usage: discord-records-bot export --user-id=ID --guild-id=ID [--output=file.jsonl] [--since=RFC3339] [--window=5] [--min-turns=2]")
+	if *guildID == "" {
+		fmt.Fprintln(os.Stderr, "Usage: discord-records-bot export --guild-id=ID [--output=file.jsonl] [--since=RFC3339] [--window=5] [--min-turns=3]")
 		os.Exit(1)
 	}
 
@@ -82,9 +82,6 @@ func runExport() {
 		}
 	}
 
-	displayName := resolveDisplayName(conn, *userID)
-	systemPrompt := fmt.Sprintf(defaultSystemPromptTpl, displayName, displayName, displayName)
-
 	userNames, err := buildUserNameMap(conn, *guildID)
 	if err != nil {
 		log.Fatalf("Failed to build user name map: %v", err)
@@ -100,8 +97,8 @@ func runExport() {
 		messages[i].Content = sanitizeContent(messages[i].Content, userNames)
 	}
 
-	conversations := buildConversations(messages, *userID, systemPrompt, *windowMin, *minTurns)
-	log.Printf("Built %d conversations containing target user", len(conversations))
+	conversations := buildConversations(messages, defaultSystemPrompt, *windowMin, *minTurns)
+	log.Printf("Built %d conversations", len(conversations))
 
 	if err := writeJSONL(*output, conversations); err != nil {
 		log.Fatalf("Failed to write output: %v", err)
@@ -171,20 +168,6 @@ func hasExcessiveRepetition(content string) bool {
 	return false
 }
 
-func resolveDisplayName(conn *sql.DB, userID string) string {
-	var dn, un string
-	err := conn.QueryRow(
-		`SELECT COALESCE(MAX(display_name), ''), MAX(username) FROM messages WHERE user_id = $1`,
-		userID,
-	).Scan(&dn, &un)
-	if err != nil || (dn == "" && un == "") {
-		return "User"
-	}
-	if dn != "" {
-		return dn
-	}
-	return un
-}
 
 func queryExportMessages(conn *sql.DB, guildID string, since time.Time) ([]exportMsg, error) {
 	query := `SELECT user_id, username, display_name, content, sent_at, channel_id
@@ -216,12 +199,12 @@ func queryExportMessages(conn *sql.DB, guildID string, since time.Time) ([]expor
 	return msgs, rows.Err()
 }
 
-func buildConversations(messages []exportMsg, targetUserID, systemPrompt string, windowMin, minTurns int) []ShareGPTConversation {
+func buildConversations(messages []exportMsg, systemPrompt string, windowMin, minTurns int) []ShareGPTConversation {
 	var result []ShareGPTConversation
 	windows := splitIntoWindows(messages, time.Duration(windowMin)*time.Minute)
 
 	for _, window := range windows {
-		if conv, ok := formatConversation(window, targetUserID, systemPrompt, minTurns); ok {
+		if conv, ok := formatConversation(window, systemPrompt, minTurns); ok {
 			result = append(result, conv)
 		}
 	}
@@ -251,47 +234,43 @@ func splitIntoWindows(messages []exportMsg, gap time.Duration) [][]exportMsg {
 	return windows
 }
 
-func hasTargetUser(window []exportMsg, targetUserID string) bool {
-	for _, m := range window {
-		if m.UserID == targetUserID {
-			return true
-		}
-	}
-	return false
-}
-
-func buildTurns(window []exportMsg, targetUserID, systemPrompt string) []ShareGPTMessage {
+func buildTurns(window []exportMsg, systemPrompt string) []ShareGPTMessage {
 	msgs := []ShareGPTMessage{{From: "system", Value: systemPrompt}}
-	var lastRole string
+
+	var lastUserID string
+	currentRole := "human"
 
 	for _, m := range window {
-		role := "human"
-		if m.UserID == targetUserID {
-			role = "gpt"
-		}
-
 		content := strings.TrimSpace(m.Content)
 		if len(content) < 3 || hasExcessiveRepetition(content) {
 			continue
 		}
 
-		if role == lastRole && len(msgs) > 1 {
+		if m.UserID != lastUserID && lastUserID != "" {
+			if currentRole == "human" {
+				currentRole = "gpt"
+			} else {
+				currentRole = "human"
+			}
+		}
+
+		if len(msgs) > 1 && msgs[len(msgs)-1].From == currentRole {
 			msgs[len(msgs)-1].Value += "\n" + content
 		} else {
-			msgs = append(msgs, ShareGPTMessage{From: role, Value: content})
-			lastRole = role
+			msgs = append(msgs, ShareGPTMessage{From: currentRole, Value: content})
 		}
+		lastUserID = m.UserID
 	}
 
 	return msgs
 }
 
-func formatConversation(window []exportMsg, targetUserID, systemPrompt string, minTurns int) (ShareGPTConversation, bool) {
-	if !hasTargetUser(window, targetUserID) {
-		return ShareGPTConversation{}, false
-	}
+func formatConversation(window []exportMsg, systemPrompt string, minTurns int) (ShareGPTConversation, bool) {
+	msgs := buildTurns(window, systemPrompt)
 
-	msgs := buildTurns(window, targetUserID, systemPrompt)
+	if len(msgs) > 1 && msgs[len(msgs)-1].From != "gpt" {
+		msgs = msgs[:len(msgs)-1]
+	}
 
 	turnCount := 0
 	for _, m := range msgs {
@@ -300,7 +279,7 @@ func formatConversation(window []exportMsg, targetUserID, systemPrompt string, m
 		}
 	}
 
-	if turnCount < minTurns || msgs[len(msgs)-1].From != "gpt" {
+	if turnCount < minTurns {
 		return ShareGPTConversation{}, false
 	}
 
