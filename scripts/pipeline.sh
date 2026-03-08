@@ -59,20 +59,17 @@ GGUF_LOCAL="${PIPELINE_DIR}/model.gguf"
 
 BOT_CONTAINER="discord-records-bot"
 
-# Resolve the Windows machine's IP from SSH config for HTTP download.
-WINDOWS_IP=$(ssh -G "$WINDOWS_HOST" 2>/dev/null | awk '/^hostname / {print $2}')
-if [ -z "$WINDOWS_IP" ]; then
-    echo "Error: could not resolve IP for SSH host '$WINDOWS_HOST'."
-    echo "Check your ~/.ssh/config."
-    exit 1
-fi
-
 # ------------------------------------------------------------------
-# Cleanup: kill the HTTP server on Windows on any exit.
+# Cleanup: kill the HTTP server and SSH tunnel on any exit.
 # ------------------------------------------------------------------
 HTTP_SERVER_STARTED=false
+TUNNEL_PID=""
 
 cleanup() {
+    if [ -n "$TUNNEL_PID" ]; then
+        echo "Cleaning up: closing SSH tunnel (pid $TUNNEL_PID)..."
+        kill "$TUNNEL_PID" 2>/dev/null || true
+    fi
     if [ "$HTTP_SERVER_STARTED" = true ]; then
         echo "Cleaning up: stopping HTTP server on Windows..."
         ssh -o ConnectTimeout=10 "$WINDOWS_HOST" \
@@ -212,21 +209,26 @@ ssh "$WINDOWS_HOST" \
     "powershell -Command \"Get-NetTCPConnection -LocalPort ${HTTP_PORT} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue }\"" \
     2>/dev/null || true
 
-# Start the HTTP server on Windows. PowerShell Start-Process detaches
-# the process so the SSH command returns immediately.
-# Use forward slashes — Python's http.server handles them on Windows.
+# Start the HTTP server on Windows bound to localhost only (no firewall
+# issues). We then tunnel through SSH to reach it from server1.
 SERVE_DIR=$(echo "$GGUF_SEARCH_DIR" | tr '\\' '/')
 ssh "$WINDOWS_HOST" \
-    "powershell -Command \"Start-Process -FilePath '${WINDOWS_TRAIN_DIR}/venv/Scripts/python.exe' -ArgumentList '-m','http.server','${HTTP_PORT}','--directory','${SERVE_DIR}' -WindowStyle Hidden\""
+    "powershell -Command \"Start-Process -FilePath '${WINDOWS_TRAIN_DIR}/venv/Scripts/python.exe' -ArgumentList '-m','http.server','${HTTP_PORT}','--bind','127.0.0.1','--directory','${SERVE_DIR}' -WindowStyle Hidden\""
 HTTP_SERVER_STARTED=true
 
-echo "HTTP server started on ${WINDOWS_IP}:${HTTP_PORT}, waiting for it to bind..."
-sleep 3
+echo "HTTP server started on Windows (localhost:${HTTP_PORT}), opening SSH tunnel..."
+ssh -f -N -L "${HTTP_PORT}:127.0.0.1:${HTTP_PORT}" "$WINDOWS_HOST"
+sleep 2
+TUNNEL_PID=$(pgrep -f "ssh.*-L.*${HTTP_PORT}:127.0.0.1:${HTTP_PORT}" | head -1)
+if [ -z "$TUNNEL_PID" ]; then
+    echo "Warning: could not find SSH tunnel PID, will skip cleanup."
+fi
+echo "SSH tunnel open (pid ${TUNNEL_PID:-unknown})."
 
-# Download the GGUF.
-echo "Downloading ${GGUF_FILENAME} (~2 GB)..."
+# Download the GGUF through the SSH tunnel.
+echo "Downloading ${GGUF_FILENAME} (~2 GB) via SSH tunnel..."
 if ! curl -f --progress-bar -o "$GGUF_LOCAL" \
-    "http://${WINDOWS_IP}:${HTTP_PORT}/${GGUF_FILENAME}"; then
+    "http://127.0.0.1:${HTTP_PORT}/${GGUF_FILENAME}"; then
     echo "Error: curl download failed."
     exit 1
 fi
