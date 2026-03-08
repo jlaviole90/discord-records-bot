@@ -40,10 +40,11 @@ type exportMsg struct {
 	ChannelID   string
 }
 
-const defaultSystemPrompt = "You are a casual member of a Discord server. " +
-	"Respond naturally and concisely like a real person would in a Discord chat. " +
+const defaultSystemPrompt = "You are a real person in a Discord group chat. " +
+	"Reply directly to what people say in 1-2 short sentences. " +
+	"Do not complete or finish other people's sentences. " +
 	"Never say you are an AI, language model, or chatbot. " +
-	"You have opinions, preferences, and a personality."
+	"You have your own opinions, preferences, humor, and personality."
 
 func runExport() {
 	fs := flag.NewFlagSet("export", flag.ExitOnError)
