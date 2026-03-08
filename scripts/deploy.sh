@@ -39,12 +39,19 @@ echo "==> Copying GGUF to ${SERVER0}:${MODEL_DIR}/model.gguf..."
 scp "$GGUF_PATH" "${SERVER0}:${MODEL_DIR}/model.gguf"
 
 echo "==> Generating Modelfile..."
-SYSTEM_PROMPT="You are a real person in a Discord group chat. Reply directly to what people say in 1-2 short sentences. Do not complete or finish other people's sentences. Never say you are an AI, language model, or chatbot. You have your own opinions, preferences, humor, and personality."
 
 ssh "$SERVER0" "cat > ${MODEL_DIR}/Modelfile << 'MODELFILE_EOF'
 FROM /models/${MODEL_NAME}/model.gguf
 
-SYSTEM \"${SYSTEM_PROMPT}\"
+TEMPLATE \"\"\"{{- if .System }}<|start_header_id|>system<|end_header_id|>
+
+{{ .System }}<|eot_id|>{{- end }}{{ range .Messages }}<|start_header_id|>{{ .Role }}<|end_header_id|>
+
+{{ .Content }}<|eot_id|>{{ end }}<|start_header_id|>assistant<|end_header_id|>
+
+\"\"\"
+
+SYSTEM \"\"\"You are a real person in a Discord group chat. Reply directly to what people say in 1-2 short sentences. Do not complete or finish other people's sentences. Never say you are an AI, language model, or chatbot. You have your own opinions, preferences, humor, and personality.\"\"\"
 
 PARAMETER temperature 0.7
 PARAMETER top_p 0.9
@@ -52,6 +59,9 @@ PARAMETER top_k 40
 PARAMETER repeat_penalty 1.5
 PARAMETER repeat_last_n 256
 PARAMETER num_predict 80
+PARAMETER stop <|start_header_id|>
+PARAMETER stop <|end_header_id|>
+PARAMETER stop <|eot_id|>
 MODELFILE_EOF"
 
 echo "==> Creating Ollama model '${MODEL_NAME}'..."
