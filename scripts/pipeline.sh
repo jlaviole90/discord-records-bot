@@ -47,7 +47,7 @@ SERVER0_MODELS_DIR="${SERVER0_MODELS_DIR:-/home/admin/models}"
 OLLAMA_CONTAINER="${OLLAMA_CONTAINER:-discord-quotes-bot-ollama-1}"
 
 BASE_MODEL="${BASE_MODEL:-unsloth/Llama-3.2-3B-Instruct-bnb-4bit}"
-EPOCHS="${EPOCHS:-3}"
+EPOCHS="${EPOCHS:-1}"
 QUANT_METHOD="${QUANT_METHOD:-q4_k_m}"
 HTTP_PORT="${HTTP_PORT:-8888}"
 
