@@ -35,7 +35,7 @@ def parse_args():
     p.add_argument("--adapter", default=None, help="Path to previous LoRA adapter for incremental training")
     p.add_argument("--base-model", default="unsloth/Llama-3.2-3B-Instruct-bnb-4bit",
                     help="Base model to fine-tune")
-    p.add_argument("--epochs", type=int, default=2, help="Number of training epochs")
+    p.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
     p.add_argument("--batch-size", type=int, default=2, help="Per-device train batch size")
     p.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
     p.add_argument("--lr", type=float, default=1e-4, help="Learning rate")

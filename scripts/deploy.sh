@@ -49,8 +49,9 @@ SYSTEM \"${SYSTEM_PROMPT}\"
 PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.2
-PARAMETER num_predict 150
+PARAMETER repeat_penalty 1.5
+PARAMETER repeat_last_n 256
+PARAMETER num_predict 60
 MODELFILE_EOF"
 
 echo "==> Creating Ollama model '${MODEL_NAME}'..."
