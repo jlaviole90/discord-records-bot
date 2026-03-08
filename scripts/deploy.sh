@@ -46,10 +46,11 @@ FROM /models/${MODEL_NAME}/model.gguf
 
 SYSTEM \"${SYSTEM_PROMPT}\"
 
-PARAMETER temperature 0.8
+PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 PARAMETER top_k 40
-PARAMETER repeat_penalty 1.1
+PARAMETER repeat_penalty 1.3
+PARAMETER num_predict 256
 MODELFILE_EOF"
 
 echo "==> Creating Ollama model '${MODEL_NAME}'..."

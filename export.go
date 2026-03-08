@@ -13,11 +13,13 @@ import (
 )
 
 var (
-	customEmojiRe  = regexp.MustCompile(`<a?:(\w+):\d+>`)
+	customEmojiRe  = regexp.MustCompile(`<a?:\w+:\d+>`)
+	colonEmojiRe   = regexp.MustCompile(`:\w[\w+-]*:`)
 	userMentionRe  = regexp.MustCompile(`<@!?(\d+)>`)
 	channelMentionRe = regexp.MustCompile(`<#\d+>`)
 	roleMentionRe  = regexp.MustCompile(`<@&\d+>`)
 	urlRe          = regexp.MustCompile(`https?://\S+`)
+	multiSpaceRe   = regexp.MustCompile(`\s{2,}`)
 )
 
 type ShareGPTMessage struct {
@@ -131,7 +133,8 @@ func buildUserNameMap(conn *sql.DB, guildID string) (map[string]string, error) {
 }
 
 func sanitizeContent(content string, userNames map[string]string) string {
-	content = customEmojiRe.ReplaceAllString(content, ":$1:")
+	content = customEmojiRe.ReplaceAllString(content, "")
+	content = colonEmojiRe.ReplaceAllString(content, "")
 
 	content = userMentionRe.ReplaceAllStringFunc(content, func(match string) string {
 		sub := userMentionRe.FindStringSubmatch(match)
@@ -146,6 +149,7 @@ func sanitizeContent(content string, userNames map[string]string) string {
 	content = channelMentionRe.ReplaceAllString(content, "#channel")
 	content = roleMentionRe.ReplaceAllString(content, "@role")
 	content = urlRe.ReplaceAllString(content, "")
+	content = multiSpaceRe.ReplaceAllString(content, " ")
 
 	return strings.TrimSpace(content)
 }
@@ -250,16 +254,8 @@ func buildTurns(window []exportMsg, targetUserID, systemPrompt string) []ShareGP
 		}
 
 		content := strings.TrimSpace(m.Content)
-		if content == "" {
+		if len(content) < 3 {
 			continue
-		}
-
-		if role == "human" {
-			name := m.DisplayName
-			if name == "" {
-				name = m.Username
-			}
-			content = name + ": " + content
 		}
 
 		if role == lastRole && len(msgs) > 1 {
