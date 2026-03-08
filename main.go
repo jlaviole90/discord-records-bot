@@ -66,7 +66,8 @@ func main() {
 
 	dg.Identify.Intents = discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
-		discordgo.IntentMessageContent
+		discordgo.IntentMessageContent |
+		discordgo.IntentsGuildMessageReactions
 
 	dg.StateEnabled = true
 	dg.State.MaxMessageCount = 100
