@@ -471,8 +471,9 @@ func handleLeaderboard(s *discordgo.Session, m *discordgo.MessageCreate, since *
 	s.ChannelMessageSend(m.ChannelID, msg)
 }
 
-// isPublicChannel checks whether the @everyone role can view a channel,
-// so results are safe to display publicly regardless of who invoked the command.
+// isPublicChannel returns false only when @everyone has an explicit
+// ViewChannel deny on the channel. This avoids relying on the guild
+// role cache, which may be incomplete.
 func isPublicChannel(s *discordgo.Session, guildID, channelID string) bool {
 	ch, err := s.State.Channel(channelID)
 	if err != nil {
@@ -482,35 +483,12 @@ func isPublicChannel(s *discordgo.Session, guildID, channelID string) bool {
 		}
 	}
 
-	guild, err := s.State.Guild(guildID)
-	if err != nil {
-		guild, err = s.Guild(guildID)
-		if err != nil {
+	for _, ow := range ch.PermissionOverwrites {
+		if ow.ID == guildID && ow.Deny&discordgo.PermissionViewChannel != 0 {
 			return false
 		}
 	}
-
-	var basePerms int64
-	for _, role := range guild.Roles {
-		if role.ID == guildID {
-			basePerms = role.Permissions
-			break
-		}
-	}
-
-	if basePerms&discordgo.PermissionAdministrator != 0 {
-		return true
-	}
-
-	for _, ow := range ch.PermissionOverwrites {
-		if ow.ID == guildID {
-			basePerms &= ^ow.Deny
-			basePerms |= ow.Allow
-			break
-		}
-	}
-
-	return basePerms&discordgo.PermissionViewChannel != 0
+	return true
 }
 
 func filterVisibleChannels(s *discordgo.Session, channels []ChannelActivity, guildID, currentChannelID string, limit int) []ChannelActivity {
